@@ -1,0 +1,2 @@
+"""Internship Intelligence Platform backend."""
+
