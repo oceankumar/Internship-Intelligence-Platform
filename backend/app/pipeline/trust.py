@@ -2,8 +2,23 @@ from urllib.parse import urlparse
 
 from app.models import Company, Job
 
+BLACKLIST_COMPANIES = {
+    "unified mentor",
+    "wake up whistle",
+    "bharat intern",
+    "internpe",
+}
+
 
 def score_company_trust(company: Company, job: Job | None = None) -> Company:
+    name_lower = company.name.lower()
+    if any(blacklisted in name_lower for blacklisted in BLACKLIST_COMPANIES):
+        company.trust_score = 0
+        company.suspicious = True
+        company.excluded = True
+        company.trust_reasons = ["Company is on the blacklist"]
+        return company
+
     score = 20
     reasons: list[str] = []
 

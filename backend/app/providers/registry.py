@@ -5,6 +5,10 @@ from app.providers.remoteok import RemoteOKProvider
 from app.providers.wellfound import WellfoundProvider
 from app.providers.work_at_startup import WorkAtAStartupProvider
 from app.providers.yc_jobs import YCJobsProvider
+from app.providers.simplify_jobs import SimplifyJobsProvider
+from app.providers.github_jobs import GitHubJobsProvider
+from app.providers.public_datasets import PublicDatasetsProvider
+from app.providers.startup_career_pages import StartupCareerPagesProvider
 
 
 def get_providers(settings: Settings, sources: list[SourceName] | None = None) -> list[Provider]:
@@ -13,6 +17,10 @@ def get_providers(settings: Settings, sources: list[SourceName] | None = None) -
         SourceName.yc_jobs: YCJobsProvider,
         SourceName.work_at_a_startup: WorkAtAStartupProvider,
         SourceName.wellfound: WellfoundProvider,
+        SourceName.simplify_jobs: SimplifyJobsProvider,
+        SourceName.github_jobs: GitHubJobsProvider,
+        SourceName.public_datasets: PublicDatasetsProvider,
+        SourceName.startup_career_pages: StartupCareerPagesProvider,
     }
     selected = sources or list(available.keys())
     return [available[source](settings) for source in selected]

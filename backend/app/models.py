@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class RemoteStatus(str, Enum):
@@ -23,6 +23,10 @@ class SourceName(str, Enum):
     yc_jobs = "yc_jobs"
     work_at_a_startup = "work_at_a_startup"
     wellfound = "wellfound"
+    simplify_jobs = "simplify_jobs"
+    github_jobs = "github_jobs"
+    public_datasets = "public_datasets"
+    startup_career_pages = "startup_career_pages"
 
 
 class RawInternship(BaseModel):
@@ -75,6 +79,38 @@ class Job(BaseModel):
     score_reasons: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     suspicious: bool = False
+    
+    # Phase 1.7 & Phase 1.8 fields
+    first_seen: datetime | None = None
+    last_seen: datetime | None = None
+    sources: list[SourceName] = Field(default_factory=list)
+    source_count: int = 1
+    is_new: bool = True
+    days_since_seen: int = 0
+    match_score: int = 0
+    application_priority: str = "Low Priority"
+    application_status: str = "not_applied"
+    match_reasons: list[str] = Field(default_factory=list)
+    matching_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def init_migration_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Migrate source list
+            if not data.get("sources"):
+                s = data.get("source")
+                if s:
+                    data["sources"] = [s]
+            # Migrate first_seen/last_seen
+            disc = data.get("date_discovered") or datetime.utcnow().isoformat()
+            if not data.get("first_seen"):
+                data["first_seen"] = data.get("first_seen") or disc
+            if not data.get("last_seen"):
+                data["last_seen"] = data.get("last_seen") or disc
+        return data
+
 
 
 class DiscoveryRequest(BaseModel):
@@ -84,11 +120,20 @@ class DiscoveryRequest(BaseModel):
     persist: bool = True
 
 
+class SourceReport(BaseModel):
+    source: str
+    raw_jobs: int
+    internships: int
+    paid_internships: int
+    remote_internships: int
+
+
 class DiscoveryResponse(BaseModel):
     discovered: int
     stored: int
     jobs: list[Job]
     errors: dict[str, str] = Field(default_factory=dict)
+    source_report: list[SourceReport] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

@@ -104,7 +104,7 @@ h1 {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -201,7 +201,7 @@ h1 {
 
 .jobRow {
   display: grid;
-  grid-template-columns: 82px 1fr 88px;
+  grid-template-columns: 82px 1fr 160px 88px;
   gap: 16px;
   align-items: stretch;
   background: var(--panel);
@@ -211,7 +211,8 @@ h1 {
 }
 
 .scoreBlock,
-.trustBlock {
+.trustBlock,
+.compensationBlock {
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
@@ -310,6 +311,13 @@ h2 {
   font-size: 24px;
 }
 
+.compensationBlock strong {
+  color: var(--ink);
+  font-size: 14px;
+  text-align: center;
+  padding: 0 4px;
+}
+
 .emptyState {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -348,7 +356,8 @@ h2 {
   }
 
   .scoreBlock,
-  .trustBlock {
+  .trustBlock,
+  .compensationBlock {
     grid-auto-flow: column;
     justify-content: start;
     padding: 12px;

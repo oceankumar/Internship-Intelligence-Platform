@@ -7,13 +7,25 @@ class WorkAtAStartupProvider(Provider):
     endpoint = "https://www.workatastartup.com/jobs"
 
     async def discover(self, query: str, limit: int) -> list[RawInternship]:
-        async with self.client() as client:
-            response = await client.get(self.endpoint, params={"query": query})
-            response.raise_for_status()
-            html = response.text
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "max-age=0",
+            "Upgrade-Insecure-Requests": "1"
+        }
+        try:
+            async with self.client() as client:
+                response = await client.get(self.endpoint, headers=headers)
+                response.raise_for_status()
+                html = response.text
+        except Exception as e:
+            # Gracefully log/document that requests are blocked or fail without active user sessions
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Work at a Startup fetch failed or was blocked by auth: {e}")
+            return []
 
-        # Work at a Startup changes frontend markup often, so this provider keeps
-        # extraction intentionally shallow and isolated from the pipeline.
         from bs4 import BeautifulSoup
 
         soup = BeautifulSoup(html, "html.parser")

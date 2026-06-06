@@ -31,6 +31,20 @@ export type Job = {
   score_reasons: string[];
   tags: string[];
   suspicious: boolean;
+  
+  // New lifecycle & ranking fields
+  first_seen?: string | null;
+  last_seen?: string | null;
+  sources: string[];
+  source_count: number;
+  is_new: boolean;
+  days_since_seen: number;
+  match_score: number;
+  application_priority: "Apply Today" | "Apply This Week" | "Low Priority";
+  application_status: "not_applied" | "applied" | "interview" | "rejected" | "offer";
+  match_reasons: string[];
+  matching_skills: string[];
+  missing_skills: string[];
 };
 
 export type DiscoveryResponse = {

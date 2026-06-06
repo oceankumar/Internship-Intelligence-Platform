@@ -17,7 +17,9 @@ class Settings(BaseSettings):
 
     @property
     def data_path(self) -> Path:
-        return Path(self.local_data_path)
+        config_dir = Path(__file__).parent.resolve()
+        backend_dir = config_dir.parent
+        return (backend_dir / self.local_data_path).resolve()
 
     @property
     def supabase_enabled(self) -> bool:

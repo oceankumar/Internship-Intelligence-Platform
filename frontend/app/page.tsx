@@ -55,12 +55,86 @@ export default function Dashboard() {
   }, [filter, jobs]);
 
   const metrics = useMemo(() => {
+    const newToday = jobs.filter((job) => job.is_new).length;
+    const newThisWeek = jobs.filter((job) => job.days_since_seen <= 7).length;
+    const updatedThisWeek = jobs.filter((job) => job.source_count > 1 && job.days_since_seen <= 7).length;
+    const topMatches = jobs.filter((job) => job.match_score >= 85).length;
+    const highPriority = jobs.filter((job) => job.application_priority === "Apply Today").length;
+
     return {
       total: jobs.length,
-      paid: jobs.filter((job) => job.compensation_status === "paid").length,
-      remote: jobs.filter((job) => job.remote_status === "remote").length,
+      newToday,
+      newThisWeek,
+      updatedThisWeek,
+      topMatches,
+      highPriority,
       suspicious: jobs.filter((job) => job.suspicious).length,
-      averageScore: jobs.length ? Math.round(jobs.reduce((sum, job) => sum + job.relevance_score, 0) / jobs.length) : 0
+      averageStipend: (() => {
+        const parsedStipends = jobs
+          .map((job) => {
+            if (!job.compensation) return null;
+            const str = job.compensation.toLowerCase();
+            if (str.includes("unpaid") || str.includes("no stipend")) return null;
+            
+            const cleanStr = str.replace(/,/g, '');
+            const numbers = cleanStr.match(/\d+(\.\d+)?/g);
+            if (!numbers || numbers.length === 0) return null;
+            
+            let amount = 0;
+            if (numbers.length >= 2) {
+              amount = (parseFloat(numbers[0]) + parseFloat(numbers[1])) / 2;
+            } else {
+              amount = parseFloat(numbers[0]);
+            }
+            
+            let period = "month";
+            if (cleanStr.includes("hour") || cleanStr.includes("hr")) {
+              period = "hour";
+            } else if (cleanStr.includes("year") || cleanStr.includes("yr") || cleanStr.includes("annual")) {
+              period = "year";
+            } else if (cleanStr.includes("week") || cleanStr.includes("wk")) {
+              period = "week";
+            }
+            
+            let isUSD = true;
+            if (cleanStr.includes("₹") || cleanStr.includes("inr") || cleanStr.includes("rs") || cleanStr.includes("rupee")) {
+              isUSD = false;
+            }
+            
+            let monthlyAmount = amount;
+            if (period === "hour") {
+              monthlyAmount = amount * 160;
+            } else if (period === "year") {
+              monthlyAmount = amount / 12;
+            } else if (period === "week") {
+              monthlyAmount = amount * 4;
+            }
+            
+            return { amount: monthlyAmount, isUSD };
+          })
+          .filter((x): x is { amount: number; isUSD: boolean } => x !== null);
+
+        const usdStipends = parsedStipends.filter(s => s.isUSD).map(s => s.amount);
+        const inrStipends = parsedStipends.filter(s => !s.isUSD).map(s => s.amount);
+
+        if (usdStipends.length > 0 && inrStipends.length > 0) {
+          const avgUsd = Math.round(usdStipends.reduce((a, b) => a + b, 0) / usdStipends.length);
+          const avgInr = Math.round(inrStipends.reduce((a, b) => a + b, 0) / inrStipends.length);
+          const formattedInr = avgInr >= 1000 ? `${Math.round(avgInr / 1000)}k` : `${avgInr}`;
+          return `$${avgUsd} / ₹${formattedInr}`;
+        } else if (usdStipends.length > 0) {
+          const avgUsd = Math.round(usdStipends.reduce((a, b) => a + b, 0) / usdStipends.length);
+          return `$${avgUsd}/mo`;
+        } else if (inrStipends.length > 0) {
+          const avgInr = Math.round(inrStipends.reduce((a, b) => a + b, 0) / inrStipends.length);
+          if (avgInr >= 1000) {
+            return `₹${Math.round(avgInr / 1000)}k/mo`;
+          } else {
+            return `₹${avgInr}/mo`;
+          }
+        }
+        return "N/A";
+      })()
     };
   }, [jobs]);
 
@@ -88,10 +162,13 @@ export default function Dashboard() {
       </section>
 
       <section className="metrics" aria-label="Dashboard metrics">
-        <Metric label="Total" value={metrics.total} />
-        <Metric label="Paid" value={metrics.paid} />
-        <Metric label="Remote" value={metrics.remote} />
-        <Metric label="Avg score" value={metrics.averageScore} />
+        <Metric label="Total Internships" value={metrics.total} />
+        <Metric label="New Today" value={metrics.newToday} />
+        <Metric label="New This Week" value={metrics.newThisWeek} />
+        <Metric label="Updated This Week" value={metrics.updatedThisWeek} />
+        <Metric label="Top Matches" value={metrics.topMatches} />
+        <Metric label="High Priority" value={metrics.highPriority} />
+        <Metric label="Avg Stipend" value={metrics.averageStipend} />
         <Metric label="Flagged" value={metrics.suspicious} tone="warn" />
       </section>
 
@@ -128,7 +205,7 @@ export default function Dashboard() {
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone?: "warn" }) {
+function Metric({ label, value, tone }: { label: string; value: number | string; tone?: "warn" }) {
   return (
     <div className={tone === "warn" ? "metric warn" : "metric"}>
       <span>{label}</span>
@@ -138,40 +215,119 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: "
 }
 
 function JobRow({ job }: { job: Job }) {
-  const scoreClass = job.relevance_score >= 80 ? "good" : job.relevance_score >= 55 ? "mid" : "low";
+  const [expanded, setExpanded] = useState(false);
+  const scoreClass = job.match_score >= 80 ? "good" : job.match_score >= 60 ? "mid" : "low";
+  
+  const sourcesList = job.sources && job.sources.length > 0 ? job.sources : [job.source];
+  
   return (
-    <article className="jobRow">
+    <article 
+      className={`jobRow ${expanded ? 'expanded' : ''}`} 
+      onClick={() => setExpanded(!expanded)} 
+      style={{ 
+        cursor: "pointer", 
+        transition: "all 0.2s ease-in-out",
+        border: expanded ? "1px solid var(--primary)" : "1px solid var(--line)"
+      }}
+    >
       <div className="scoreBlock">
-        <span className={`score ${scoreClass}`}>{job.relevance_score}</span>
+        <span className={`score ${scoreClass}`}>{job.match_score}</span>
         <span>match</span>
       </div>
       <div className="jobMain">
         <div className="jobHeader">
           <div>
-            <h2>{job.title}</h2>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <h2>{job.title}</h2>
+              {job.application_priority === "Apply Today" && (
+                <span style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981", fontSize: "11px", fontWeight: "bold", padding: "2px 6px", borderRadius: "4px" }}>Apply Today</span>
+              )}
+              {job.application_priority === "Apply This Week" && (
+                <span style={{ background: "rgba(59, 130, 246, 0.15)", color: "#3b82f6", fontSize: "11px", fontWeight: "bold", padding: "2px 6px", borderRadius: "4px" }}>Apply This Week</span>
+              )}
+              {job.is_new && (
+                <span style={{ background: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", fontSize: "11px", fontWeight: "bold", padding: "2px 6px", borderRadius: "4px" }}>NEW</span>
+              )}
+            </div>
             <p>{job.company.name}</p>
           </div>
-          <a href={job.url} target="_blank" rel="noreferrer" className="openLink" title="Open internship">
+          <a href={job.url} target="_blank" rel="noreferrer" className="openLink" title="Open internship" onClick={(e) => e.stopPropagation()}>
             <ExternalLink size={18} />
           </a>
         </div>
         <div className="chips">
-          <span>{job.source}</span>
+          <span>{sourcesList.join(", ")}</span>
           <span>{job.remote_status}</span>
           <span>{job.compensation_status}</span>
           {job.location ? <span>{job.location}</span> : null}
+          {job.source_count > 1 && <span style={{ color: "var(--primary)" }}>{job.source_count} sources</span>}
+          {job.days_since_seen > 0 && <span>Seen {job.days_since_seen}d ago</span>}
         </div>
         <p className="description">{job.description || "No description collected yet."}</p>
-        <div className="skillLine">
-          {job.required_skills.slice(0, 6).map((skill) => (
-            <span key={skill}>{skill}</span>
-          ))}
-        </div>
-        <div className="reasons">
-          {job.score_reasons.slice(0, 3).map((reason) => (
-            <span key={reason}>{reason}</span>
-          ))}
-        </div>
+        
+        {expanded ? (
+          <div className="jobDetailsExpanded" style={{ marginTop: "16px", paddingTop: "16px", borderTop: "1px solid var(--line)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
+              <div>
+                <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "8px", color: "var(--foreground)" }}>Why this matches Ocean:</h4>
+                <ul style={{ listStyleType: "disc", paddingLeft: "20px", color: "var(--muted)" }}>
+                  {job.match_reasons.map((reason, idx) => (
+                    <li key={idx} style={{ fontSize: "13px", marginBottom: "4px" }}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <div style={{ marginBottom: "12px" }}>
+                  <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "4px", color: "var(--foreground)" }}>Matching Skills:</h4>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {job.matching_skills.length > 0 ? (
+                      job.matching_skills.map((skill) => (
+                        <span key={skill} style={{ background: "rgba(16, 185, 129, 0.1)", color: "#10b981", padding: "4px 8px", borderRadius: "4px", fontSize: "11px" }}>{skill}</span>
+                      ))
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "var(--muted)" }}>None detected</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <h4 style={{ fontSize: "14px", fontWeight: "bold", marginBottom: "4px", color: "var(--foreground)" }}>Missing Skills:</h4>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {job.missing_skills.length > 0 ? (
+                      job.missing_skills.map((skill) => (
+                        <span key={skill} style={{ background: "rgba(239, 68, 68, 0.1)", color: "#ef4444", padding: "4px 8px", borderRadius: "4px", fontSize: "11px" }}>{skill}</span>
+                      ))
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "var(--muted)" }}>None detected</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div style={{ display: "flex", gap: "24px", marginTop: "16px", fontSize: "13px", color: "var(--muted)" }}>
+              <div><strong>Application Priority:</strong> {job.application_priority}</div>
+              <div><strong>Status:</strong> {job.application_status.replace("_", " ")}</div>
+              <div><strong>First Seen:</strong> {job.days_since_seen === 0 ? "Today" : `${job.days_since_seen} days ago`}</div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="skillLine">
+              {job.required_skills.slice(0, 6).map((skill) => (
+                <span key={skill}>{skill}</span>
+              ))}
+            </div>
+            <div className="reasons">
+              {job.match_reasons.slice(0, 3).map((reason) => (
+                <span key={reason}>{reason}</span>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="compensationBlock">
+        <span>Stipend</span>
+        <strong>{job.compensation || "Compensation Not Listed"}</strong>
       </div>
       <div className="trustBlock">
         {job.suspicious ? <AlertTriangle size={18} /> : <ShieldCheck size={18} />}

@@ -1,80 +1,147 @@
 # Internship Intelligence Platform
 
-Phase 1 builds an internship discovery and management system for a CS and AI student seeking paid frontend, full-stack, React, Next.js, startup, and reasonable AI internships.
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
+[![Next.js](https://img.shields.io/badge/Next.js-black?style=flat&logo=next.js)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript)](https://www.typescriptlang.org)
+[![Python](https://img.shields.io/badge/Python-3.14-blue?style=flat&logo=python)](https://www.python.org)
 
-This phase intentionally does not include auto-apply, browser submission automation, or resume editing.
+An autonomous internship discovery, precision-filtering, and ranking intelligence engine built specifically for students. It aggregates hundreds of raw jobs, eliminates 100% of title-matching noise (such as "Internal Tools" or "International Accounting") using regex-based boundary checking, merges duplicate listings using multi-dimensional matching rules, and ranks opportunities with a custom rule-based scoring engine tailored to frontend/React and startup roles.
 
-## Architecture
+---
 
-- `backend/`: FastAPI discovery API, provider modules, normalization, scoring, trust checks, CSV and Excel exports.
-- `frontend/`: Next.js dashboard for reviewing opportunities, trust flags, scores, and exports.
-- `supabase/schema.sql`: Production-ready Postgres schema for Supabase.
+## 🛠️ System Architecture
 
-## Local Setup
+The system consists of a fast Python backend orchestrating multi-source discovery, validation, scoring, and deduplication, coupled with a Next.js frontend rendering an interactive dashboard.
 
-Backend:
+```
+                  ┌──────────────────────────────────────────────┐
+                  │                 Next.js UI                   │
+                  │   (Dashboard, Match Score, Stipends, Export)  │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                                   HTTP (JSON API)
+                                         │
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │                FastAPI App                   │
+                  │   (endpoints, exporter, make_repository)     │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │              Discovery Runner                │
+                  │    (orchestrator, registry, normalizer)      │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                 ┌───────────────────────┼───────────────────────┐
+                 ▼                       ▼                       ▼
+      ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
+      │  SimplifyJobs HTML  │ │   GitHub Trackers   │ │   Greenhouse APIs   │
+      └─────────────────────┘ └─────────────────────┘ └─────────────────────┘
+                 │                       │                       │
+                 └───────────────────────┼───────────────────────┘
+                                         │
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │              Candidate Filter                │
+                  │   (Regex word boundaries, Seniority gating)  │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │           Ocean Kumar Ranking                │
+                  │     (React, Paid, Remote, Startup weights)   │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │             Deduplication Engine             │
+                  │ (Primary Company+Title, Secondary Domain+Sim)│
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │               Repository Layer               │
+                  │  (Local JSON Store / Supabase Postgres Sync)  │
+                  └──────────────────────────────────────────────┘
+```
+
+---
+
+## ✨ Features
+
+* **Multi-Source Crawling**: Integrates RemoteOK, Y Combinator Jobs, Github tech trackers, SimplifyJobs community lists, open source databases (GSoC, Outreachy, LFX, MLH Fellowship), and direct startup Greenhouse boards (Stripe, Reddit, GitLab, Anthropic, Figma, Vercel).
+* **Precision Regex Boundary Filtering**: Bypasses typical false positive title overlaps (such as *Internal Product Engineer* or *International Strategic Lead*) by matching root terms with strict word boundary checks (`\b(intern|...)\b`) and gating seniority exclusions first.
+* **Smart Deduplication**: Merges duplicates across providers using a primary match (`company + title`) and a secondary match (`application domain + title similarity`). Merged records combine tags/skills, record all source platforms in a `sources[]` list, increment `source_count`, and keep the highest trust scores and richest stipend numbers.
+* **Ocean Kumar Scoring**: Applies rule-based weighting (0-100) scoring internships for Ocean's profile (1st year CS/AI student, React/Next.js stack, paid remote/hybrid, early-stage startups).
+* **Priority Categorization**: Buckets roles automatically into *Apply Today*, *Apply This Week*, and *Low Priority*.
+* **Interactive Expandable Details View**: Expand cards on the dashboard to inspect matching skills, missing skills, match reasons, first seen age, and the list of aggregating sources.
+* **Exporting**: Instant export of reviewed internships to CSV and Microsoft Excel formats.
+* **Dual Database Persistence**: Operates on a canonical local JSON file (`backend/data/internships.json`) with instant, seamless migration to Supabase PostgreSQL when variables are set.
+
+---
+
+## 💻 Tech Stack
+
+* **Backend**: Python 3.14+, FastAPI, Pydantic v2, Pytest, Uvicorn, OpenPyXL
+* **Frontend**: React, Next.js, TypeScript, Lucide Icons, Vanilla CSS
+* **Database**: Local JSON File / Supabase (PostgreSQL)
+
+---
+
+## 🚀 Local Installation & Run
+
+### Prerequisites
+
+* Python 3.10+
+* Node.js 18+
+
+### 1. Set Up Backend
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp ../.env.example .env
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Frontend:
+*The backend starts up on `http://127.0.0.1:8000`. On boot, it automatically performs a self-healing cleanup of local storage, filtering out any legacy false positives.*
+
+### 2. Set Up Frontend
 
 ```bash
 cd frontend
 npm install
-cp ../.env.example .env.local
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+*The Next.js dev server starts up on `http://localhost:3000`.*
 
-## Supabase
+---
 
-1. Create a Supabase project.
-2. Run `supabase/schema.sql` in the SQL editor or through migrations.
-3. Set these environment variables for the backend:
+## 📸 Screenshots
 
-```bash
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-```
+### Dashboard Overview & Metrics Bar
+![Dashboard Metrics](docs/images/dashboard_metrics.png)
 
-If Supabase variables are not present, the backend falls back to a local JSON repository at `backend/data/internships.json`.
+### Stipends Visibility & match Scores
+![Stipend Visibility](docs/images/dashboard_stipends.png)
 
-## Discovery Sources
+---
 
-Current provider modules:
+## 🔮 Future Roadmap
 
-- RemoteOK
-- Y Combinator Jobs
-- Work at a Startup
-- Wellfound
+- [ ] **Dual-Platform Application Status Synchronization**: Implement a PATCH endpoint to update application statuses directly from the Next.js frontend with single-click actions and timeline states (Applied, Interview, Rejection, Offer).
+- [ ] **Resume Version Tracking**: Add a `resume_version` tracker field to record which resume was used for which submission.
+- [ ] **Days Since Applied Analytics**: Compute and display real-time counters representing how long an application has been active.
+- [ ] **Advanced Domain Filtering**: Expand the secondary confidence deduplication engine to support customizable domain regexes.
 
-Each source implements the same provider contract, so future LinkedIn, Internshala, Indeed, and company-career-page connectors can be added without changing the rest of the pipeline.
+---
 
-## API
+## 👥 Author
 
-- `GET /health`
-- `GET /api/jobs`
-- `POST /api/discovery/run`
-- `GET /api/companies/suspicious`
-- `GET /api/export.csv`
-- `GET /api/export.xlsx`
-
-## Product Rules
-
-Relevance favors:
-
-- Paid roles
-- Remote or India-friendly roles
-- Frontend, React, Next.js, web, full-stack, startup engineering, and product engineering internships
-- Reasonable requirements for a student with about 3 months of internship experience
-
-Trust scoring flags companies with weak signals such as missing website, thin descriptions, missing LinkedIn presence, no product evidence, and vague or unpaid listings.
-
+**Ocean Kumar**  
+CS + AI Student and Software Engineer  
+Targeting Paid React, Next.js, Frontend, Fullstack, and Early-stage Startup Internships.

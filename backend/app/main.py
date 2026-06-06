@@ -25,6 +25,16 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    import logging
+    logger = logging.getLogger("uvicorn")
+    settings = get_settings()
+    logger.info(f"FastAPI starting up. Database type: {'Supabase' if settings.supabase_enabled else 'Local JSON'}")
+    if not settings.supabase_enabled:
+        logger.info(f"Canonical Database File Path: {settings.data_path}")
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health(settings: Settings = Depends(get_settings)) -> HealthResponse:
     return HealthResponse(status="ok", storage="supabase" if settings.supabase_enabled else "local_json")
