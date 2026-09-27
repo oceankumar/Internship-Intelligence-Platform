@@ -1,9 +1,11 @@
-import asyncio
 import json
 from datetime import datetime
+from urllib.parse import urljoin
+
 from bs4 import BeautifulSoup
 
 from app.models import RawInternship, RemoteStatus, SourceName
+from app.pipeline.dedupe import canonical_domain
 from app.providers.base import Provider
 
 
@@ -13,132 +15,44 @@ class YCJobsProvider(Provider):
 
     async def discover(self, query: str, limit: int) -> list[RawInternship]:
         async with self.client() as client:
-            response = await client.get(self.endpoint, params={"query": query})
+            response = await client.get(self.endpoint)
             response.raise_for_status()
-            html = response.text
-
-        soup = BeautifulSoup(html, "html.parser")
-        cards = soup.select("a[href*='/companies/'][href*='/jobs/']")
-        links_data: list[tuple[str, str]] = []
-        seen: set[str] = set()
-
-        for card in cards:
-            href = card.get("href")
-            if not href:
-                continue
-            url = href if href.startswith("http") else f"https://www.ycombinator.com{href}"
-            if url in seen:
-                continue
-            seen.add(url)
-            card_text = " ".join(card.get_text(" ", strip=True).split())
-            links_data.append((url, card_text))
-
-        # Limit candidate links to discover
-        links_data = links_data[:limit]
-
-        async def fetch_and_parse_details(url: str, card_text: str) -> RawInternship:
-            try:
-                async with self.client() as detail_client:
-                    r = await detail_client.get(url)
-                    if r.status_code == 200:
-                        s = BeautifulSoup(r.text, "html.parser")
-                        tag = s.find("script", type="application/ld+json")
-                        if tag and tag.string:
-                            data = json.loads(tag.string)
-                            title = data.get("title") or self._split_title_company(card_text)[0]
-                            company_name = data.get("hiringOrganization", {}).get("name") or self._split_title_company(card_text)[1]
-                            description = data.get("description") or card_text
-                            company_website = data.get("hiringOrganization", {}).get("sameAs")
-                            
-                            # Parse locations
-                            locations = []
-                            job_locs = data.get("jobLocation", [])
-                            if isinstance(job_locs, dict):
-                                job_locs = [job_locs]
-                            for loc in job_locs:
-                                addr = loc.get("address", {})
-                                parts = []
-                                if addr.get("addressLocality"):
-                                    parts.append(addr.get("addressLocality"))
-                                if addr.get("addressRegion"):
-                                    parts.append(addr.get("addressRegion"))
-                                if addr.get("addressCountry"):
-                                    parts.append(addr.get("addressCountry"))
-                                if parts:
-                                    locations.append(", ".join(parts))
-                            location_str = " / ".join(locations) if locations else None
-                            
-                            # Parse salary
-                            salary = data.get("baseSalary", {})
-                            salary_str = None
-                            if salary:
-                                curr = salary.get("currency", "")
-                                val = salary.get("value", {})
-                                if isinstance(val, dict):
-                                    min_val = val.get("minValue")
-                                    max_val = val.get("maxValue")
-                                    unit = val.get("unitText", "")
-                                    if min_val and max_val:
-                                        salary_str = f"{min_val} - {max_val} {curr}"
-                                        if unit:
-                                            salary_str += f" per {unit}"
-                                    elif min_val:
-                                        salary_str = f"{min_val} {curr}"
-                                        if unit:
-                                            salary_str += f" per {unit}"
-                            
-                            date_posted = None
-                            date_str = data.get("datePosted")
-                            if date_str:
-                                try:
-                                    date_posted = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                                except ValueError:
-                                    pass
-
-                            return RawInternship(
-                                source=self.source,
-                                source_id=url,
-                                title=title,
-                                company_name=company_name,
-                                url=url,
-                                description=description,
-                                company_description="Y Combinator structured job listing",
-                                company_website=company_website,
-                                location=location_str,
-                                remote_status=RemoteStatus.unknown,
-                                compensation=salary_str,
-                                date_posted=date_posted,
-                                raw=data,
-                            )
-            except Exception:
-                pass
-
-            # Fallback to old behavior if anything fails
-            title, company = self._split_title_company(card_text)
-            return RawInternship(
-                source=self.source,
-                source_id=url,
-                title=title,
-                company_name=company,
-                url=url,
-                description=card_text,
-                company_description="Y Combinator company listing",
-                remote_status=RemoteStatus.unknown,
-                raw={"card_text": card_text},
-            )
-
-        if not links_data:
-            return []
-
-        tasks = [fetch_and_parse_details(url, text) for url, text in links_data]
-        return list(await asyncio.gather(*tasks))
-
-    def _split_title_company(self, text: str) -> tuple[str, str]:
-        separators = [" at ", " - ", " | "]
-        for separator in separators:
-            if separator in text:
-                left, right = text.split(separator, 1)
-                return left.strip() or "Software intern", right.strip() or "YC company"
-        return text[:120], "YC company"
-
-
+            soup = BeautifulSoup(response.text, "html.parser")
+            node = soup.select_one("[data-page]")
+            rows = json.loads(node["data-page"]).get("props", {}).get("jobPostings", []) if node else []
+            if not rows:
+                self.warnings.append("Structured jobPostings payload missing")
+            jobs = []
+            # Fetch details only for internship candidates; preserve structured metadata on failure.
+            for row in rows:
+                title = row.get("title", "")
+                if not any(s in (title + " " + row.get("type", "")).lower() for s in ("intern", "co-op", "fellow")):
+                    continue
+                url = urljoin(self.endpoint, row.get("url", ""))
+                if canonical_domain(url) != "ycombinator.com":
+                    continue
+                raw = RawInternship(source=self.source, source_id=str(row["id"]), title=title, company_name=row.get("companyName") or "Unknown company", url=url, company_description=row.get("companyOneLiner"), location=row.get("location"), compensation=row.get("salaryRange") or None, raw=row)
+                try:
+                    detail = await client.get(url)
+                    detail.raise_for_status()
+                    for tag in BeautifulSoup(detail.text, "html.parser").select('script[type="application/ld+json"]'):
+                        payload = json.loads(tag.string or "{}")
+                        items = payload if isinstance(payload, list) else payload.get("@graph", [payload])
+                        data = next((d for d in items if d.get("@type") == "JobPosting"), None)
+                        if not data:
+                            continue
+                        raw.description = data.get("description") or ""
+                        raw.company_website = data.get("hiringOrganization", {}).get("sameAs")
+                        if data.get("jobLocationType") == "TELECOMMUTE":
+                            raw.remote_status = RemoteStatus.remote
+                        if data.get("datePosted"):
+                            raw.date_posted = datetime.fromisoformat(data["datePosted"].replace("Z", "+00:00"))
+                        if data.get("validThrough"):
+                            raw.deadline = datetime.fromisoformat(data["validThrough"].replace("Z", "+00:00"))
+                        raw.raw["detail"] = data
+                except Exception:
+                    self.warnings.append("A YC detail page could not be parsed; retained listing metadata")
+                jobs.append(raw)
+                if len(jobs) >= limit:
+                    break
+            return jobs

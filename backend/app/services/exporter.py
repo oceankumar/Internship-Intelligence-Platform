@@ -18,6 +18,9 @@ HEADERS = [
     "source_count",
     "relevance_score",
     "match_score",
+    "opportunity_score",
+    "eligibility",
+    "deadline",
     "application_priority",
     "application_status",
     "days_since_seen",
@@ -34,7 +37,7 @@ def jobs_to_csv(jobs: list[Job]) -> str:
     writer = csv.DictWriter(buffer, fieldnames=HEADERS)
     writer.writeheader()
     for job in jobs:
-        writer.writerow(_row(job))
+        writer.writerow({k: safe_cell(v) for k, v in _row(job).items()})
     return buffer.getvalue()
 
 
@@ -45,7 +48,9 @@ def jobs_to_xlsx(jobs: list[Job]) -> bytes:
     sheet.append(HEADERS)
     for job in jobs:
         row = _row(job)
-        sheet.append([row[header] for header in HEADERS])
+        sheet.append([safe_cell(row[header]) for header in HEADERS])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
     for column in sheet.columns:
         width = min(48, max(12, max(len(str(cell.value or "")) for cell in column) + 2))
         sheet.column_dimensions[column[0].column_letter].width = width
@@ -68,6 +73,9 @@ def _row(job: Job) -> dict[str, str | int | bool | None]:
         "source_count": job.source_count,
         "relevance_score": job.relevance_score,
         "match_score": job.match_score,
+        "opportunity_score": job.opportunity_score,
+        "eligibility": job.eligibility_status,
+        "deadline": job.deadline.isoformat() if job.deadline else "",
         "application_priority": job.application_priority,
         "application_status": job.application_status,
         "days_since_seen": job.days_since_seen,
@@ -78,3 +86,8 @@ def _row(job: Job) -> dict[str, str | int | bool | None]:
         "date_discovered": job.date_discovered.isoformat(),
     }
 
+
+def safe_cell(value):
+    if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value

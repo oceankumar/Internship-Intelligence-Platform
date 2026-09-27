@@ -1,73 +1,105 @@
 import hashlib
 import re
+from difflib import SequenceMatcher
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.models import Job
 
 
-def job_fingerprint(job: Job) -> str:
-    # We still need a unique stable ID for storage.
-    # The user says "Do NOT use job_id as the primary deduplication key."
-    # That means when merging, we check company + title normalized, not just job_id.
-    # But we can still generate a deterministic id using the primary merge key!
-    c_comp = canonical_company(job.company.name)
-    c_title = canonical_title(job.title)
-    key = f"{c_comp}|{c_title}".lower()
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-
-
-def company_fingerprint(name: str, website_url: str | None = None) -> str:
-    website = canonical_domain(website_url) if website_url else ""
-    key = website or re.sub(r"[^a-z0-9]+", "", name.lower())
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-
-
 def canonical_url(url: str) -> str:
-    if not url:
-        return ""
-    return url.split("?")[0].rstrip("/").strip().lower()
+    try:
+        p = urlsplit(url.strip())
+        query = [(k, v) for k, v in parse_qsl(p.query) if not k.lower().startswith("utm_") and k.lower() not in {"ref", "source", "referral"}]
+        return urlunsplit((p.scheme.lower(), p.netloc.lower(), p.path.rstrip("/"), urlencode(sorted(query)), ""))
+    except ValueError:
+        return url
 
 
 def canonical_domain(url: str | None) -> str:
-    if not url:
+    try:
+        return (urlsplit(url or "").hostname or "").removeprefix("www.").lower()
+    except ValueError:
         return ""
-    cleaned = url.replace("https://", "").replace("http://", "").split("/")[0]
-    return cleaned.removeprefix("www.").lower()
 
 
 def canonical_company(name: str) -> str:
-    n = name.lower().strip()
-    n = re.sub(r"\b(inc|corp|co|ltd|llc|gmbh|software|technologies|labs|systems)\b", "", n)
-    n = re.sub(r"[^a-z0-9]", "", n)
-    return n.strip()
+    name = re.sub(r"\b(incorporated|inc|corp|ltd|llc|gmbh)\.?$", "", name.lower().strip())
+    return " ".join(re.sub(r"[^\w\s]", " ", name).split())
 
 
 def canonical_title(title: str) -> str:
-    t = title.lower().strip()
-    t = t.encode('ascii', 'ignore').decode('ascii') # remove emojis
-    t = re.sub(r"[^a-z0-9\s\-]", " ", t)
-    # standardize title representations
-    t = re.sub(r"\b(internship|intern)\b", "intern", t)
-    t = re.sub(r"\b(co-op|coop)\b", "coop", t)
-    t = re.sub(r"\b(swe)\b", "software engineer", t)
-    t = re.sub(r"\b(dev)\b", "developer", t)
-    t = re.sub(r"\b(front end|front-end)\b", "frontend", t)
-    t = re.sub(r"\b(back end|back-end)\b", "backend", t)
-    t = re.sub(r"\b(full stack|full-stack)\b", "fullstack", t)
-    return " ".join(t.split())
+    title = title.lower()
+    for pat, replacement in [(r"\bswe\b", "software engineer"), (r"\bsoftware engineering\b", "software engineer"), (r"\binternship\b", "intern"), (r"front[ -]end", "frontend"), (r"back[ -]end", "backend"), (r"full[ -]stack", "fullstack")]:
+        title = re.sub(pat, replacement, title)
+    return " ".join(re.sub(r"[^\w\s]", " ", title).split())
 
 
-def titles_are_similar(title1: str, title2: str) -> bool:
-    t1 = canonical_title(title1)
-    t2 = canonical_title(title2)
-    if t1 == t2:
+def titles_are_similar(a: str, b: str) -> bool:
+    return canonical_title(a) == canonical_title(b)
+
+
+def job_fingerprint(job: Job) -> str:
+    return hashlib.sha256(canonical_url(job.url).encode()).hexdigest()[:24]
+
+
+def company_fingerprint(name: str, website_url: str | None = None) -> str:
+    return hashlib.sha256(canonical_company(name).encode()).hexdigest()[:24]
+
+
+def same_job(a: Job, b: Job) -> bool:
+    if {canonical_url(u) for u in [a.url, *a.original_urls]}.intersection(canonical_url(u) for u in [b.url, *b.original_urls]):
         return True
-    words1 = set(t1.split())
-    words2 = set(t2.split())
-    core_keywords = {"software", "engineer", "developer", "frontend", "backend", "fullstack", "ai", "ml", "data", "react", "next", "design", "firmware", "embedded"}
-    t1_core = words1.intersection(core_keywords)
-    t2_core = words2.intersection(core_keywords)
-    if t1_core and t2_core:
-        return len(t1_core.intersection(t2_core)) > 0
-    return False
+    if a.source == b.source:
+        return bool(a.source_id and b.source_id and a.source_id == b.source_id)
+    if canonical_company(a.company.name) != canonical_company(b.company.name):
+        return False
+    if canonical_title(a.title) != canonical_title(b.title):
+        return False
+    if not a.location or not b.location or a.location.casefold() != b.location.casefold():
+        return False
+    # Different requisitions can have identical titles: require corroborating text.
+    return min(len(a.description), len(b.description)) >= 160 and SequenceMatcher(None, a.description, b.description).ratio() >= 0.92
 
 
+USER_FIELDS = ("application_status", "applied_at", "favorite", "hidden", "notes", "interview_at", "reminder_at", "contact", "corrections")
+
+
+def merge_jobs(existing: list[Job], incoming: list[Job]) -> tuple[list[Job], dict[str, int]]:
+    output = [j.model_copy(deep=True) for j in existing]
+    metrics = {"new": 0, "updated": 0, "duplicates": 0}
+    for item in incoming:
+        old = next((j for j in output if same_job(j, item)), None)
+        fresh = item.model_copy(deep=True)
+        fresh.id = old.id if old else (fresh.id or job_fingerprint(fresh))
+        fresh.company.id = old.company.id if old else company_fingerprint(fresh.company.name)
+        if old:
+            metrics["duplicates"] += 1
+            metrics["updated"] += 1
+            if len(old.description) > len(fresh.description):
+                fresh.description, fresh.summary = old.description, old.summary
+                fresh.required_skills, fresh.preferred_skills = old.required_skills, old.preferred_skills
+            if not fresh.compensation:
+                for key in ("compensation", "compensation_status", "stipend_min", "stipend_max", "compensation_currency", "compensation_period"):
+                    setattr(fresh, key, getattr(old, key))
+            fresh.first_seen = old.first_seen
+            fresh.date_discovered = old.date_discovered
+            for key in ("date_posted", "deadline", "location"):
+                if getattr(fresh, key) is None:
+                    setattr(fresh, key, getattr(old, key))
+            fresh.provenance = {**old.provenance, **fresh.provenance}
+            if not fresh.company.website_url:
+                fresh.company.website_url = old.company.website_url
+            fresh.company.excluded = old.company.excluded or fresh.company.excluded
+            for key in USER_FIELDS:
+                setattr(fresh, key, getattr(old, key))
+            fresh.sources = list(dict.fromkeys(old.sources + fresh.sources + [fresh.source]))
+            fresh.original_urls = list(dict.fromkeys(old.original_urls + [old.url] + fresh.original_urls + [fresh.url]))
+            fresh.url, fresh.source, fresh.source_id = old.url, old.source, old.source_id
+            output[output.index(old)] = fresh
+        else:
+            metrics["new"] += 1
+            fresh.sources = list(dict.fromkeys(fresh.sources + [fresh.source]))
+            fresh.original_urls = list(dict.fromkeys(fresh.original_urls + [fresh.url]))
+            output.append(fresh)
+        fresh.source_count = len(fresh.sources)
+    return output, metrics

@@ -11,10 +11,7 @@ class StartupCareerPagesProvider(Provider):
     source = SourceName.startup_career_pages
 
     async def discover(self, query: str, limit: int) -> list[RawInternship]:
-        companies = ["stripe", "reddit", "gitlab", "anthropic", "figma", "vercel"]
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
+        companies = self.settings.greenhouse_boards
         
         jobs: list[RawInternship] = []
         terms = [term.lower() for term in query.split() if len(term) > 2]
@@ -23,12 +20,11 @@ class StartupCareerPagesProvider(Provider):
             url = f"https://boards-api.greenhouse.io/v1/boards/{company}/jobs"
             try:
                 async with self.client() as client:
-                    response = await client.get(url, headers=headers)
+                    response = await client.get(url, params={"content": "true"})
                     response.raise_for_status()
                     data = response.json()
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to fetch Greenhouse board for {company}: {e}")
+            except Exception:
+                self.warnings.append(f"Greenhouse board {company}: fetch or parsing failed")
                 continue
                 
             jobs_list = data.get("jobs", [])
@@ -36,7 +32,7 @@ class StartupCareerPagesProvider(Provider):
                 title = j.get("title", "")
                 title_lower = title.lower()
                 
-                is_internship = "intern" in title_lower or "co-op" in title_lower or "coop" in title_lower or "fellow" in title_lower
+                is_internship = bool(re.search(r"\b(intern|internship|co-op|coop|fellow|fellowship)\b", title_lower))
                 if not is_internship:
                     continue
                     
@@ -46,11 +42,12 @@ class StartupCareerPagesProvider(Provider):
                     continue
                     
                 # Clean job URL
-                job_url = job_url.split("?")[0].split("&")[0]
+                from app.pipeline.dedupe import canonical_url
+                job_url = canonical_url(job_url)
                 
                 # Fetch metadata to extract date
                 updated_at_str = j.get("updated_at")
-                date_posted = datetime.utcnow()
+                date_posted = None
                 if updated_at_str:
                     try:
                         date_posted = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
@@ -77,7 +74,7 @@ class StartupCareerPagesProvider(Provider):
                 # Determine remote status
                 loc_lower = location_name.lower()
                 remote_status = RemoteStatus.unknown
-                if "remote" in loc_lower or "remote" in title_lower or company == "gitlab":
+                if "remote" in loc_lower or "remote" in title_lower:
                     remote_status = RemoteStatus.remote
                     
                 jobs.append(
@@ -87,11 +84,11 @@ class StartupCareerPagesProvider(Provider):
                         title=title,
                         company_name=company.capitalize(),
                         url=job_url,
-                        description=f"Active internship opening at {company.capitalize()}: {title}. Location: {location_name}.",
+                        description=j.get("content") or "",
                         location=location_name,
                         remote_status=remote_status,
-                        compensation="Paid stipend", # Active top-tier tech internships are paid
-                        date_posted=date_posted,
+                        compensation=None,
+                        date_posted=None,
                         raw=j
                     )
                 )

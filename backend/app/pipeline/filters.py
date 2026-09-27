@@ -17,7 +17,7 @@ def is_phase_one_candidate(job: Job) -> bool:
     description = job.description.lower()
     
     # Check seniority / exclusions first
-    if SENIORITY_REGEX.search(title):
+    if SENIORITY_REGEX.search(title) and not re.search(r"\b(?:product|project) manager intern\b", title):
         return False
         
     # Check internship keywords with word boundaries
@@ -33,4 +33,16 @@ def is_phase_one_candidate(job: Job) -> bool:
     ]
     return any(phrase in description for phrase in opportunity_phrases)
 
+
+def rejection_reason(job: Job) -> str | None:
+    from app.pipeline.urls import safe_public_url
+    if not safe_public_url(job.url):
+        return "REJECTED_INVALID_URL"
+    if SENIORITY_REGEX.search(job.title) and not re.search(r"\b(?:product|project) manager intern\b", job.title, re.I):
+        return "REJECTED_SENIOR_ROLE"
+    if not is_phase_one_candidate(job):
+        return "REJECTED_NOT_INTERNSHIP"
+    if job.company.excluded:
+        return "REJECTED_EXCLUDED_COMPANY"
+    return None
 

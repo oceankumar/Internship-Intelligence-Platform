@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 import httpx
 
@@ -12,12 +12,9 @@ class SimplifyJobsProvider(Provider):
 
     async def discover(self, query: str, limit: int) -> list[RawInternship]:
         url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
         
         async with self.client() as client:
-            response = await client.get(url, headers=headers)
+            response = await client.get(url)
             response.raise_for_status()
             content = response.text
 
@@ -75,7 +72,8 @@ class SimplifyJobsProvider(Provider):
                 continue
                 
             # Clean job URL
-            job_url = job_url.split("?")[0].split("&")[0]
+            from app.pipeline.dedupe import canonical_url
+            job_url = canonical_url(job_url)
             
             # Smart term matching query filter
             searchable = f"{company_name} {role_text} {location_text}".lower()
@@ -108,7 +106,7 @@ class SimplifyJobsProvider(Provider):
                     company_website=company_website,
                     location=location_text,
                     remote_status=RemoteStatus.unknown,
-                    compensation="Paid stipend", # Default to paid for community-curated listings
+                    compensation=None,
                     date_posted=date_posted,
                     raw={
                         "category": "Tech",
@@ -123,10 +121,10 @@ class SimplifyJobsProvider(Provider):
                 
         return jobs
 
-    def _parse_relative_age(self, age_str: str) -> datetime:
-        now = datetime.utcnow()
+    def _parse_relative_age(self, age_str: str) -> datetime | None:
+        now = datetime.now(timezone.utc)
         match = re.match(r"^(\d+)\s*d$", age_str, re.IGNORECASE)
         if match:
             days = int(match.group(1))
             return now - timedelta(days=days)
-        return now
+        return None

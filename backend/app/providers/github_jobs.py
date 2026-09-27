@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 import httpx
 
@@ -17,9 +17,6 @@ class GitHubJobsProvider(Provider):
             ("vansh_us", "https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/main/README.md")
         ]
         
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
         
         jobs: list[RawInternship] = []
         terms = [term.lower() for term in query.split() if len(term) > 2]
@@ -27,12 +24,11 @@ class GitHubJobsProvider(Provider):
         for key, url in urls:
             try:
                 async with self.client() as client:
-                    response = await client.get(url, headers=headers)
+                    response = await client.get(url)
                     response.raise_for_status()
                     content = response.text
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(f"Failed to fetch {url}: {e}")
+            except Exception:
+                self.warnings.append("Tracker fetch or parsing failed")
                 continue
 
             lines = content.split("\n")
@@ -103,7 +99,8 @@ class GitHubJobsProvider(Provider):
                     continue
                 
                 # Clean job URL
-                job_url = job_url.split("?")[0].split("&")[0]
+                from app.pipeline.dedupe import canonical_url
+                job_url = canonical_url(job_url)
                 
                 # Smart term matching query filter
                 searchable = f"{company_name} {role_text} {location_text}".lower()
@@ -136,7 +133,7 @@ class GitHubJobsProvider(Provider):
                         company_website=company_website,
                         location=location_text,
                         remote_status=RemoteStatus.unknown,
-                        compensation="Paid stipend", # Default to paid for community-curated listings
+                        compensation=None,
                         date_posted=date_posted,
                         raw={
                             "sub_source": key,
@@ -154,11 +151,11 @@ class GitHubJobsProvider(Provider):
                 
         return jobs
 
-    def _parse_date_string(self, val_str: str) -> datetime:
-        now = datetime.utcnow()
+    def _parse_date_string(self, val_str: str) -> datetime | None:
+        now = datetime.now(timezone.utc)
         val_str = val_str.strip()
         if not val_str:
-            return now
+            return None
             
         # Match "1d", "2d", etc.
         match_days = re.match(r"^(\d+)\s*d$", val_str, re.IGNORECASE)
@@ -175,10 +172,10 @@ class GitHubJobsProvider(Provider):
             if month_name in months:
                 month_idx = months.index(month_name) + 1
                 try:
-                    dt = datetime(now.year, month_idx, day)
+                    dt = datetime(now.year, month_idx, day, tzinfo=timezone.utc)
                     if dt > now:
-                        dt = datetime(now.year - 1, month_idx, day)
+                        dt = datetime(now.year - 1, month_idx, day, tzinfo=timezone.utc)
                     return dt
                 except ValueError:
                     pass
-        return now
+        return None
