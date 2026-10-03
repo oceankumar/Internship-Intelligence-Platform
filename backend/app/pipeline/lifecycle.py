@@ -19,6 +19,10 @@ def refresh_lifecycle(job: Job, now: datetime | None = None) -> Job:
     job.expired = bool(job.deadline and utc(job.deadline) < now)
     job.stale = unseen >= get_settings().stale_days
     job.active = not (job.closed or job.expired or unseen >= get_settings().inactive_days)
+    if job.opportunity_type != "internship" and job.application_state != "open":
+        job.active = False
+    if job.application_state == "closed":
+        job.active = False
     job.freshness_score = max(0, 100 - age * 3) if job.date_posted else max(0, 60 - age * 2)
     job.urgency_score = 100 if job.deadline and 0 <= (utc(job.deadline) - now).total_seconds() <= 7 * 86400 else 0
     if not job.active:

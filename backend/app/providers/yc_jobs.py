@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from urllib.parse import urljoin
 
@@ -22,16 +23,20 @@ class YCJobsProvider(Provider):
             rows = json.loads(node["data-page"]).get("props", {}).get("jobPostings", []) if node else []
             if not rows:
                 self.warnings.append("Structured jobPostings payload missing")
+            else:
+                self.warnings.append(f"Coverage limited to {len(rows)} postings exposed on the public page; no verified pagination endpoint")
             jobs = []
             # Fetch details only for internship candidates; preserve structured metadata on failure.
             for row in rows:
                 title = row.get("title", "")
-                if not any(s in (title + " " + row.get("type", "")).lower() for s in ("intern", "co-op", "fellow")):
+                if not re.search(r"\b(?:intern|internship|co-op|fellow|fellowship)\b", title + " " + row.get("type", ""), re.I):
                     continue
                 url = urljoin(self.endpoint, row.get("url", ""))
                 if canonical_domain(url) != "ycombinator.com":
                     continue
                 raw = RawInternship(source=self.source, source_id=str(row["id"]), title=title, company_name=row.get("companyName") or "Unknown company", url=url, company_description=row.get("companyOneLiner"), location=row.get("location"), compensation=row.get("salaryRange") or None, raw=row)
+                raw.raw["employment_type"] = "internship"
+                raw.raw["listing_page"] = self.endpoint
                 try:
                     detail = await client.get(url)
                     detail.raise_for_status()

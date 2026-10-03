@@ -10,7 +10,7 @@ import httpx
 
 from app.config import Settings
 from app.models import DiscoveryRequest, DiscoveryResponse, Job, SourceReport
-from app.pipeline.dedupe import merge_jobs
+from app.pipeline.dedupe import merge_jobs, same_job, identity_keys, canonical_company, canonical_title
 from app.pipeline.filters import rejection_reason
 from app.pipeline.normalizer import normalize_job
 from app.pipeline.scorer import score_job
@@ -22,6 +22,23 @@ logger = logging.getLogger(__name__)
 
 
 async def run_discovery(settings: Settings, repository: Repository, request: DiscoveryRequest) -> DiscoveryResponse:
+    owner = str(uuid4())
+    if not request.persist:
+        return await asyncio.wait_for(_run_discovery(settings, repository, request), timeout=settings.discovery_timeout_seconds)
+    if not await repository.acquire_discovery(owner, settings.discovery_lease_seconds):
+        from fastapi import HTTPException
+        raise HTTPException(429, "Another discovery owns the workspace lease")
+    try:
+        await repository.recover_runs(settings.discovery_lease_seconds)
+        return await asyncio.wait_for(_run_discovery(settings, repository, request), timeout=min(settings.discovery_timeout_seconds, settings.discovery_lease_seconds - 60))
+    except BaseException as exc:
+        await asyncio.shield(repository.fail_running_runs("cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"))
+        raise
+    finally:
+        await asyncio.shield(repository.release_discovery(owner))
+
+
+async def _run_discovery(settings: Settings, repository: Repository, request: DiscoveryRequest) -> DiscoveryResponse:
     started = time.monotonic()
     run_id = await repository.create_discovery_run(request.query, request.limit_per_source) if request.persist else str(uuid4())
     profile = await repository.profile()
@@ -35,7 +52,7 @@ async def run_discovery(settings: Settings, repository: Repository, request: Dis
         begin = time.monotonic()
         source = provider.source.value
         report = SourceReport(source=source, raw_jobs=0, internships=0, paid_internships=0, remote_internships=0)
-        if source in {"wellfound", "work_at_a_startup"}:
+        if source in {"wellfound", "work_at_a_startup"} or source not in settings.enabled_sources:
             report.status = "disabled"
             report.error = "Public automated access unavailable; source disabled"
             return report, []
@@ -43,9 +60,10 @@ async def run_discovery(settings: Settings, repository: Repository, request: Dis
             async with semaphore:
                 raw = await asyncio.wait_for(provider.discover(request.query, request.limit_per_source), timeout=max(30, settings.request_timeout_seconds * 6))
             report.raw_jobs = len(raw)
+            report.fetch_success = bool(raw) or any(c.successful_requests for c in getattr(provider, "clients", []))
             report.warnings = provider.warnings
             if not raw or provider.warnings:
-                report.status = "degraded"
+                report.status = "degraded" if provider.warnings else "low_yield"
                 if not raw:
                     report.warnings.append("No records returned; empty feed or parser change needs review")
             return report, raw
@@ -82,21 +100,44 @@ async def run_discovery(settings: Settings, repository: Repository, request: Dis
                 report.internships += 1
                 report.paid_internships += int(job.compensation_status == "paid")
                 report.remote_internships += int(job.remote_status == "remote")
+                report.active_records += int(job.active and job.risk_state not in {"quarantined", "blocked"})
+                report.quarantined_records += int(job.risk_state in {"quarantined", "blocked"})
+                report.useful_records += int(job.active and job.opportunity_type == "internship" and job.risk_state not in {"quarantined", "blocked"} and len(job.description.split()) >= 40)
             except Exception:
                 report.rejected += 1
                 report.rejection_reasons["NORMALIZATION_ERROR"] = report.rejection_reasons.get("NORMALIZATION_ERROR", 0) + 1
                 report.status = "degraded"
+                report.parse_errors += 1
 
     existing = await repository.list_jobs()
     merged, counts = merge_jobs(existing, jobs)
     incoming_urls = {u for j in jobs for u in [j.url, *j.original_urls]}
     affected_ids = {j.id for j in merged if incoming_urls.intersection([j.url, *j.original_urls])}
-    seen = list(existing)
-    from app.pipeline.dedupe import same_job
+    identity_index, groups = {}, {}
+    def index_seen(job):
+        for key in identity_keys(job):
+            identity_index.setdefault(key, []).append(job)
+        groups.setdefault((canonical_company(job.company.name), canonical_title(job.title)), []).append(job)
+    for job in existing:
+        index_seen(job)
     for job in jobs:
-        if any(same_job(job, old) for old in seen):
+        candidates = [old for key in identity_keys(job) for old in identity_index.get(key, [])]
+        candidates.extend(groups.get((canonical_company(job.company.name), canonical_title(job.title)), []))
+        if any(same_job(job, old) for old in candidates):
             next(r for r in reports if r.source == job.source).duplicates += 1
-        seen.append(job)
+        else:
+            next(r for r in reports if r.source == job.source).new_records += 1
+        index_seen(job)
+    for report in reports:
+        report.invalid_url_records = report.rejection_reasons.get("REJECTED_INVALID_URL", 0)
+        if any("PARSER_DRIFT" in w for w in report.warnings):
+            report.status = "parser_drift"
+        elif report.status == "healthy" and not report.useful_records:
+            report.status = "low_yield"
+    for job in merged:
+        if job.id in affected_ids:
+            score_job(job, profile)
+    affected = [j for j in merged if j.id in affected_ids]
     metrics = {
         "fetched": len(all_raw), "internships": len(jobs), "rejected": sum(r.rejected for r in reports),
         **counts, "paid": sum(j.compensation_status == "paid" for j in jobs),
@@ -106,13 +147,16 @@ async def run_discovery(settings: Settings, repository: Repository, request: Dis
         "priority_distribution": dict(Counter(j.application_priority for j in jobs)),
         "score_distribution": dict(Counter(f"{j.match_score // 20 * 20}-{min(100, j.match_score // 20 * 20 + 19)}" for j in jobs)),
         "ai": dict(ai_counts),
+        "active": sum(j.active and j.opportunity_type == "internship" and j.risk_state not in {"quarantined", "blocked"} for j in affected),
+        "quarantined": sum(j.risk_state in {"quarantined", "blocked"} for j in affected),
+        "providers_requested": len(reports),
+        "providers_succeeded": sum(r.fetch_success for r in reports),
+        "useful": sum(r.useful_records for r in reports),
     }
-    status = "failed" if reports and all(r.status in {"failing", "disabled"} for r in reports) else "completed"
+    status = "failed" if not reports or all(r.status in {"failing", "disabled"} for r in reports) else "degraded" if not metrics["active"] else "completed_with_warnings" if any(r.status != "healthy" for r in reports) else "completed"
     if request.persist:
         try:
-            await repository.store_raw_jobs(run_id, all_raw)
-            await repository.upsert_jobs(jobs)
-            await repository.update_discovery_run(run_id, status, counts["new"], len(jobs), errors, provider_results=[r.model_dump() for r in reports], metrics=metrics, rejections=rejections, duration_ms=round((time.monotonic() - started) * 1000))
+            await repository.complete_discovery(run_id, affected, all_raw, status, counts["new"], len(jobs), errors, provider_results=[r.model_dump() for r in reports], metrics=metrics, rejections=rejections, duration_ms=round((time.monotonic() - started) * 1000))
         except Exception:
             await repository.update_discovery_run(run_id, "failed", 0, len(jobs), {"storage": "PERSISTENCE_ERROR"})
             raise

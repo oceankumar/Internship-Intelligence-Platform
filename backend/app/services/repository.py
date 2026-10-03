@@ -5,6 +5,7 @@ import os
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -37,6 +38,27 @@ def load_job(data: dict) -> Job:
 
 
 class Repository:
+    async def acquire_discovery(self, owner: str, seconds: int) -> bool:
+        raise NotImplementedError
+
+    async def release_discovery(self, owner: str) -> None:
+        raise NotImplementedError
+
+    async def recover_runs(self, seconds: int) -> None:
+        for run in await self.list_runs():
+            if run.get("status") == "running" and datetime.fromisoformat(run["started_at"]) < datetime.now(timezone.utc) - timedelta(seconds=seconds):
+                await self.update_discovery_run(run["id"], "cancelled", 0, 0, {"recovery": "INTERRUPTED_RUN"})
+
+    async def fail_running_runs(self, status: str) -> None:
+        for run in await self.list_runs():
+            if run.get("status") == "running":
+                await self.update_discovery_run(run["id"], status, 0, 0, {"run": "INTERRUPTED_OR_FAILED"})
+
+    async def complete_discovery(self, run_id, jobs, raw, status, stored, discovered, errors, **details):
+        await self.upsert_jobs(jobs)
+        await self.store_raw_jobs(run_id, raw)
+        await self.update_discovery_run(run_id, status, stored, discovered, errors, **details)
+
     async def list_jobs(self) -> list[Job]:
         raise NotImplementedError
 
@@ -115,6 +137,28 @@ class LocalJsonRepository(Repository):
     async def list_jobs(self) -> list[Job]:
         return await asyncio.to_thread(lambda: [load_job(j) for j in self._read()])
 
+    async def acquire_discovery(self, owner, seconds):
+        def acquire():
+            with self._lock():
+                state = self._state()
+                lease = state.get("discovery_lease", {})
+                now = datetime.now(timezone.utc)
+                if lease and datetime.fromisoformat(lease["expires"]) > now:
+                    return False
+                state["discovery_lease"] = {"owner": owner, "expires": (now + timedelta(seconds=seconds)).isoformat()}
+                self._atomic(self.state_path, state)
+                return True
+        return await asyncio.to_thread(acquire)
+
+    async def release_discovery(self, owner):
+        def release():
+            with self._lock():
+                state = self._state()
+                if state.get("discovery_lease", {}).get("owner") == owner:
+                    state.pop("discovery_lease", None)
+                    self._atomic(self.state_path, state)
+        await asyncio.to_thread(release)
+
     async def upsert_jobs(self, jobs: list[Job]) -> list[Job]:
         def write():
             with self._lock():
@@ -164,6 +208,19 @@ class SupabaseRepository(Repository):
         from supabase import create_client
         self.client = create_client(settings.supabase_url, settings.supabase_service_role_key)
 
+    async def acquire_discovery(self, owner, seconds):
+        response = await asyncio.to_thread(lambda: self.client.rpc("acquire_discovery_lease", {"owner": owner, "seconds": seconds}).execute())
+        return bool(response.data)
+
+    async def release_discovery(self, owner):
+        await asyncio.to_thread(lambda: self.client.rpc("release_discovery_lease", {"owner": owner}).execute())
+
+    async def complete_discovery(self, run_id, jobs, raw, status, stored, discovered, errors, **details):
+        run = await self.get_state("run:" + run_id, {})
+        run.update(status=status, stored_count=stored, discovered_count=discovered, errors=errors, completed_at=datetime.now(timezone.utc).isoformat(), **details)
+        rows = [{"id": hashlib.sha256(f"{run_id}:{i}:{j.url}".encode()).hexdigest()[:32], "run_id": run_id, "source_platform": j.source.value, "source_id": j.source_id, "url": j.url, "company_name": j.company_name, "title": j.title, "raw_data": j.model_dump(mode="json")} for i,j in enumerate(raw)]
+        await asyncio.to_thread(lambda: self.client.rpc("complete_intelligence_discovery", {"payload": [j.model_dump(mode="json") for j in jobs], "raw_payload": rows, "run_payload": run}).execute())
+
     async def list_jobs(self) -> list[Job]:
         def read():
             rows, offset = [], 0
@@ -177,6 +234,9 @@ class SupabaseRepository(Repository):
 
     def _job_from_row(self, row: dict) -> Job:
         data = {**row, **(row.get("intelligence") or {}), "company": row["companies"], "source": row["source_platform"]}
+        for key in ("match_score", "relevance_score", "opportunity_score", "eligibility_score", "trust_score", "risk_state", "listing_risk_score", "evidence_confidence", "fit_score", "application_priority", "active", "date_posted", "deadline", "remote_status", "compensation_status", "stipend_min", "stipend_max", "compensation_currency", "compensation_period", "opportunity_type", "application_state", "application_status", "favorite", "hidden", "notes"):
+            if key in row:
+                data[key] = row[key]
         data["notes"] = data.get("notes") or ""
         return load_job(data)
 

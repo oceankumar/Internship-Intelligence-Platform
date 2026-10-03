@@ -20,7 +20,7 @@ from app.pipeline.scorer import score_job
 from app.pipeline.normalizer import extract_skills, role_family
 from app.services.exporter import jobs_to_csv, jobs_to_xlsx
 from app.services.repository import make_repository
-from app.services.search import Filters, filter_jobs, parse_query, sort_jobs
+from app.services.search import Filters, filter_jobs, interpret_query, sort_jobs
 
 settings = get_settings()
 app = FastAPI(title="Internship Intelligence", version="2.0.0")
@@ -71,6 +71,16 @@ async def health():
     return {"status": "ok", "storage": "supabase" if settings.supabase_enabled else "local_json", "ai_enabled": settings.enable_ai_classification}
 
 
+@app.get("/ready")
+async def ready(repository=Depends(get_repository)):
+    try:
+        await asyncio.wait_for(repository.get_state("profile", {}), timeout=5)
+        await asyncio.wait_for(repository.list_jobs(), timeout=10)
+    except Exception:
+        raise HTTPException(503, "Repository is not ready")
+    return {"status": "ready", "storage": "supabase" if settings.supabase_enabled else "local_json", "ai_configured": bool(settings.enable_ai_classification and settings.ai_model)}
+
+
 async def ranked(repository):
     profile = await repository.profile()
     return [score_job(j, profile) for j in await repository.list_jobs()]
@@ -78,7 +88,7 @@ async def ranked(repository):
 
 @app.get("/api/jobs")
 async def legacy_jobs(repository=Depends(get_repository)):
-    return sort_jobs(await ranked(repository), "recommended")
+    return sort_jobs(filter_jobs(await ranked(repository), Filters()), "recommended")
 
 
 @app.get("/api/internships")
@@ -88,7 +98,8 @@ async def internships(filters: Filters = Depends(), page: int = 1, limit: int = 
     if sort == "stipend" and (not filters.currency or not filters.period):
         raise HTTPException(422, "Choose currency and pay period to compare stipends")
     jobs = sort_jobs(filter_jobs(await ranked(repository), filters), sort)
-    return {"items": jobs[(page-1)*limit:page*limit], "total": len(jobs), "page": page, "limit": limit, "parsed_filters": parse_query(filters.q) if len(filters.q.split()) > 4 else {}}
+    interpretation = interpret_query(filters.q)
+    return {"items": jobs[(page-1)*limit:page*limit], "total": len(jobs), "page": page, "limit": limit, "parsed_filters": interpretation["filters"], "unparsed_query": interpretation["unparsed"], "search_warnings": interpretation["warnings"]}
 
 
 @app.get("/api/recommendations")
@@ -123,7 +134,7 @@ async def update_application(job_id: str, body: ApplicationUpdate, repository=De
 @app.patch("/api/internships/{job_id}/corrections")
 async def correction(job_id: str, body: JobCorrection, repository=Depends(get_repository)):
     job = await detail(job_id, repository)
-    changes = {**job.corrections, **body.model_dump(mode="json", exclude_none=True)}
+    changes = {} if body.reset else {**job.corrections, **body.model_dump(mode="json", exclude_none=True, exclude={"reset"})}
     updated = await repository.patch_job(job_id, {"corrections": changes})
     return score_job(updated, await repository.profile())
 
@@ -205,8 +216,9 @@ async def provider_health(repository=Depends(get_repository)):
         current = reports[0][1] if reports else {}
         result.append({
             "source": source.value, **current,
-            "status": current.get("status", "disabled" if source.value in {"wellfound", "work_at_a_startup"} else "unknown"),
-            "last_success": next((r["completed_at"] for r, p in reports if p["status"] == "healthy"), None),
+            "status": "disabled" if source.value not in settings.enabled_sources or source.value in {"wellfound", "work_at_a_startup"} else current.get("status", "unknown"),
+            "last_success": next((r["completed_at"] for r, p in reports if p.get("fetch_success")), None),
+            "last_useful_result": next((r["completed_at"] for r, p in reports if p.get("useful_records", 0) > 0), None),
             "last_failure": next((r["completed_at"] for r, p in reports if p["status"] == "failing"), None),
         })
     return result
@@ -234,6 +246,10 @@ async def analytics(repository=Depends(get_repository)):
         "companies": count(j.company.name for j in visible),
         "discovered": count(j.date_discovered.date().isoformat() for j in visible),
         "priorities": count(j.application_priority for j in visible),
+        "quarantined": sum(j.risk_state in {"quarantined", "blocked"} for j in jobs),
+        "confirmed_paid": sum(j.compensation_status == "paid" for j in visible),
+        "india_compatible": sum(j.worldwide_remote or "India" in j.remote_countries or j.country == "India" for j in visible),
+        "programs": sum(j.opportunity_type != "internship" for j in jobs),
     }
 
 
@@ -242,9 +258,16 @@ async def suspicious(repository=Depends(get_repository)):
     return await repository.suspicious_companies()
 
 
+@app.get("/api/listings/risky")
+async def risky_listings(repository=Depends(get_repository)):
+    return [j for j in await ranked(repository) if j.risk_state in {"quarantined", "blocked"}]
+
+
 @app.get("/api/export.{format}")
-async def export(format: str, filters: Filters = Depends(), repository=Depends(get_repository)):
-    jobs = filter_jobs(await ranked(repository), filters)
+async def export(format: str, filters: Filters = Depends(), sort: str = "recommended", repository=Depends(get_repository)):
+    if sort == "stipend" and (not filters.currency or not filters.period):
+        raise HTTPException(422, "Choose currency and pay period to compare stipends")
+    jobs = sort_jobs(filter_jobs(await ranked(repository), filters), sort)
     if format == "csv":
         return Response(jobs_to_csv(jobs), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=internships.csv"})
     if format == "xlsx":
@@ -261,13 +284,10 @@ async def analyze_resume(request: Request):
             raise HTTPException(413, "Resume must be smaller than 2 MB")
     try:
         if request.headers.get("content-type", "").startswith("application/pdf"):
-            from pypdf import PdfReader
-            def parse():
-                reader = PdfReader(BytesIO(content))
-                if reader.is_encrypted or len(reader.pages) > 10:
-                    raise ValueError("PDF must be unencrypted and at most 10 pages")
-                return "\n".join(page.extract_text() or "" for page in reader.pages)[:50000]
-            text = await asyncio.to_thread(parse)
+            if not content.startswith(b"%PDF-"):
+                raise ValueError("Invalid PDF signature")
+            from app.services.resume_parser import extract_pdf
+            text = await extract_pdf(bytes(content))
         elif request.headers.get("content-type", "").startswith("text/plain"):
             text = bytes(content).decode("utf-8")[:50000]
         else:

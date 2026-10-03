@@ -25,7 +25,7 @@ class RemoteOKProvider(Provider):
             description = str(item.get("description") or "")
             tags = " ".join(item.get("tags") or [])
             searchable = f"{title} {description} {tags}".lower()
-            if not re.search(r"\b(intern|internship|co-op|fellowship)\b", searchable):
+            if not re.search(r"\b(intern|internship|co-op|fellowship)\b", title.lower() + " " + tags.lower()) and not re.search(r"(?:this|the) (?:role|position) is (?:a |an )?(?:paid )?internship", description, re.I):
                 continue
             if terms and not any(term in searchable for term in terms):
                 continue

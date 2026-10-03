@@ -18,6 +18,7 @@ class PoliteClient(httpx.AsyncClient):
         super().__init__(timeout=settings.request_timeout_seconds, headers={"User-Agent": settings.discovery_user_agent}, follow_redirects=True, max_redirects=3)
         self.settings = settings
         self.warnings = warnings
+        self.successful_requests = 0
 
     async def get(self, url, **kwargs):
         key = str(url) + str(kwargs.get("params", ""))
@@ -26,6 +27,7 @@ class PoliteClient(httpx.AsyncClient):
         async with lock:
             cached = self.cache.get(key)
             if cached and cached[0] > time.monotonic():
+                self.successful_requests += 1
                 return cached[1]
             delay = self.settings.provider_request_interval - (time.monotonic() - self.last_request.get(host, 0))
             if delay > 0:
@@ -40,6 +42,7 @@ class PoliteClient(httpx.AsyncClient):
                     break
                 await asyncio.sleep(max(1, int(retry)))
             if response.is_success:
+                self.successful_requests += 1
                 if len(self.cache) >= 500:
                     self.cache.clear()
                 self.cache[key] = (time.monotonic() + self.settings.provider_cache_seconds, response)
@@ -54,9 +57,12 @@ class Provider(ABC):
     def __init__(self, settings: Settings):
         self.settings = settings
         self.warnings: list[str] = []
+        self.clients: list[PoliteClient] = []
 
     def client(self) -> httpx.AsyncClient:
-        return PoliteClient(self.settings, self.warnings)
+        client = PoliteClient(self.settings, self.warnings)
+        self.clients.append(client)
+        return client
 
     @abstractmethod
     async def discover(self, query: str, limit: int) -> list[RawInternship]:

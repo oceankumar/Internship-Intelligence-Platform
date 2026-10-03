@@ -133,6 +133,25 @@ class Job(BaseModel):
     reminder_at: datetime | None = None
     contact: str = ""
     corrections: dict[str, Any] = Field(default_factory=dict)
+    mentioned_skills: list[str] = Field(default_factory=list)
+    fit_score: int | None = None
+    evidence_confidence: int = 0
+    skill_evidence_confidence: int = 0
+    preference_compliance: dict[str, str] = Field(default_factory=dict)
+    uncertainties: list[str] = Field(default_factory=list)
+    risk_state: Literal["normal", "review", "quarantined", "blocked"] = "review"
+    risk_reasons: list[str] = Field(default_factory=list)
+    listing_risk_score: int = 0
+    trust_score: int = 0
+    opportunity_type: str = "internship"
+    application_state: Literal["open", "closed", "unknown"] = "unknown"
+    remote_countries: list[str] = Field(default_factory=list)
+    remote_regions: list[str] = Field(default_factory=list)
+    worldwide_remote: bool = False
+    authorization_required: bool = False
+    timezone_restriction: str | None = None
+    degree_requirement: str | None = None
+    source_instances: list[dict[str, str]] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -173,6 +192,13 @@ class SourceReport(BaseModel):
     error: str | None = None
     warnings: list[str] = Field(default_factory=list)
     rejection_reasons: dict[str, int] = Field(default_factory=dict)
+    fetch_success: bool = False
+    new_records: int = 0
+    active_records: int = 0
+    invalid_url_records: int = 0
+    parse_errors: int = 0
+    quarantined_records: int = 0
+    useful_records: int = 0
 
 
 class DiscoveryResponse(BaseModel):
@@ -216,6 +242,7 @@ class JobCorrection(BaseModel):
     remote_status: RemoteStatus | None = None
     compensation_status: CompensationStatus | None = None
     required_skills: list[str] | None = Field(default=None, max_length=100)
+    reset: bool = False
 
 
 class SavedSearch(BaseModel):

@@ -29,6 +29,8 @@ HEADERS = [
     "required_skills",
     "date_posted",
     "date_discovered",
+    "stipend_min", "stipend_max", "currency", "period", "matching_skills", "missing_skills",
+    "trust_reasons", "risk_state", "risk_reasons", "fit_score", "evidence_confidence", "notes", "contact", "interview_at",
 ]
 
 
@@ -79,11 +81,18 @@ def _row(job: Job) -> dict[str, str | int | bool | None]:
         "application_priority": job.application_priority,
         "application_status": job.application_status,
         "days_since_seen": job.days_since_seen,
-        "trust_score": job.company.trust_score,
+        "trust_score": job.trust_score,
         "suspicious": job.suspicious,
         "required_skills": ", ".join(job.required_skills),
         "date_posted": job.date_posted.isoformat() if job.date_posted else "",
         "date_discovered": job.date_discovered.isoformat(),
+        "stipend_min": job.stipend_min, "stipend_max": job.stipend_max,
+        "currency": job.compensation_currency, "period": job.compensation_period,
+        "matching_skills": ", ".join(job.matching_skills), "missing_skills": ", ".join(job.missing_skills),
+        "trust_reasons": "; ".join(job.company.trust_reasons), "risk_state": job.risk_state,
+        "risk_reasons": "; ".join(job.risk_reasons), "fit_score": job.fit_score,
+        "evidence_confidence": job.evidence_confidence, "notes": job.notes, "contact": job.contact,
+        "interview_at": job.interview_at.isoformat() if job.interview_at else "",
     }
 
 

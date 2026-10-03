@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     local_data_path: str = "data/internships.json"
     discovery_user_agent: str = "InternshipIntelligenceBot/0.1"
     request_timeout_seconds: float = 20.0
-    provider_concurrency: int = 2
+    provider_concurrency: int = Field(default=2, ge=1, le=8)
     provider_cache_seconds: int = 3600
     provider_request_interval: float = 1.0
     discovery_cooldown_seconds: int = 60
@@ -31,6 +32,11 @@ class Settings(BaseSettings):
     greenhouse_boards: list[str] = ["stripe", "reddit", "gitlab", "anthropic", "figma", "vercel"]
     blocked_companies: list[str] = ["unified mentor", "wake up whistle", "bharat intern", "internpe"]
     blocked_domains: list[str] = []
+    enabled_sources: list[str] = ["remoteok", "yc_jobs", "simplify_jobs", "github_jobs", "public_datasets", "startup_career_pages"]
+    simplify_urls: list[str] = ["https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md"]
+    github_tracker_urls: list[str] = ["https://raw.githubusercontent.com/speedyapply/2026-SWE-College-Jobs/main/README.md", "https://raw.githubusercontent.com/speedyapply/2026-SWE-College-Jobs/main/INTERN_INTL.md", "https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/main/README.md"]
+    discovery_lease_seconds: int = Field(default=900, ge=180, le=3600)
+    discovery_timeout_seconds: int = Field(default=150, ge=30, le=600)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

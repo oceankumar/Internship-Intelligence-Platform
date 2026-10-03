@@ -23,6 +23,8 @@ def is_phase_one_candidate(job: Job) -> bool:
     # Check internship keywords with word boundaries
     if INTERN_REGEX.search(title):
         return True
+    if job.provenance.get("explicit_internship"):
+        return True
         
     opportunity_phrases = [
         "internship opportunity",
@@ -45,4 +47,3 @@ def rejection_reason(job: Job) -> str | None:
     if job.company.excluded:
         return "REJECTED_EXCLUDED_COMPANY"
     return None
-
