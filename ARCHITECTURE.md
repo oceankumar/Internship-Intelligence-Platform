@@ -10,7 +10,7 @@ Raw records -> normalization -> listing trust/risk -> lifecycle -> profile eligi
 
 ## Providers
 
-RemoteOK reads public JSON once; YC parses the public page's structured `jobPostings` and selectively reads candidate JSON-LD details. YC currently exposes only 20 postings with no verified pagination. Trackers use configurable seasonal README URLs, detect table headers, skip closed rows and fairly interleave sources. Greenhouse fetches configured board lists, fairly selects candidates and requests per-job detail with pay transparency. Catalogs remain separately typed and inactive when opening state is unknown. Neither disabled restricted source is scraped.
+RemoteOK reads public JSON once; YC parses the public page's structured `jobPostings` and selectively reads candidate JSON-LD details. YC currently exposes only 20 postings with no verified pagination. Trackers use configurable seasonal README URLs, detect table headers, skip closed rows and fairly interleave sources. Greenhouse fetches configured board lists, fairly selects candidates and requests per-job detail with pay transparency. The program catalog parses a public Markdown README table with fixed columns; it remains separately typed and inactive when opening state is unknown. Neither disabled restricted source is scraped.
 
 ## Ranking
 

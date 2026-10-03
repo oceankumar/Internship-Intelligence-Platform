@@ -7,7 +7,7 @@ const frontend=fileURLToPath(new URL('..',import.meta.url));
 const backend=fileURLToPath(new URL('../../backend',import.meta.url));
 const children=[];
 function start(cmd,args,cwd,env={}) {
-  const child=spawn(cmd,args,{cwd,env:{...process.env,...env},stdio:['ignore','pipe','pipe']});
+  const child=spawn(cmd,args,{cwd,env:{...process.env,...env},detached:true,stdio:['ignore','pipe','pipe']});
   child.stdout.on('data',d => process.stdout.write(d));
   child.stderr.on('data',d => process.stderr.write(d));
   children.push(child);
@@ -31,6 +31,12 @@ try {
   assert.equal(code,0,'Browser workflow failed');
   console.log('PASS: complete product smoke startup -> fixture discovery -> browser -> persistence -> export');
 } finally {
-  for (const child of children.reverse()) if(child.exitCode===null) child.kill('SIGTERM');
+  for (const child of children.reverse()) {
+    // npm launches a server child; terminate the whole isolated process group.
+    try { process.kill(-child.pid,'SIGTERM'); } catch (e) { if(e.code!=='ESRCH') throw e; }
+    child.stdout.destroy();
+    child.stderr.destroy();
+    child.unref();
+  }
   await delay(500);
 }

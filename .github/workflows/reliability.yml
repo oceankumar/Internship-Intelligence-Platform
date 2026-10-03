@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   regression:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,3 +32,4 @@ jobs:
         working-directory: frontend
       - run: node scripts/product-smoke.mjs
         working-directory: frontend
+        timeout-minutes: 3
