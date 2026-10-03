@@ -20,6 +20,10 @@ formulas, database review and prioritized follow-up.
 [Baseline findings](docs/UPGRADE_AUDIT.md) describe the pre-upgrade implementation.
 Other older status documents and screenshots describe historical releases.
 
+Current verification and limitations: [Current Status](docs/CURRENT_STATUS.md) and
+[Reliability V3 Report](docs/RELIABILITY_V3_REPORT.md). The October 4 bounded probe
+found 59 unique active-looking internship leads, not a daily-volume guarantee.
+
 ## Architecture
 
 ```mermaid
@@ -38,6 +42,8 @@ flowchart LR
   Providers --> Runs[Run diagnostics and raw records]
 ```
 
+Scam-like listings are quarantined and excluded by default. Fit, evidence completeness,
+and preference compliance are separate; unknown skills do not receive fit credit.
 Scores are recalculated on reads to reflect current profile and freshness. This
 keeps the small-workspace experience consistent but is not yet large-scale SQL
 ranking. Missing metadata stays unknown. Source health means fetch health,
@@ -121,7 +127,8 @@ This is not multi-user authentication.
 
 Back up the database first. For a new database, apply supabase/schema.sql, then
 supabase/migrations/202609260001_intelligence_v2.sql. Existing installations using
-the current base schema need only the migration. Older custom schemas need staging
+the current base schema need the migrations in order, including
+supabase/migrations/20261003202926_internship_reliability_v3.sql. Older custom schemas need staging
 compatibility review. No live migration runs automatically at startup.
 
 The migration keeps IDs/data, adds intelligence fields/indexes, enables RLS,
@@ -180,6 +187,13 @@ curl http://127.0.0.1:8000/api/discovery/run \
 ```
 
 persist=false skips run/raw/job/AI-cache writes. Discovery is manual, not scheduled.
+From backend, `.venv/bin/python -m scripts.discover --limit 20` performs persisted
+discovery with the same workspace lease as the button; add `--dry-run` for read-only
+verification. A future scheduler can call this entry point. No scheduler is installed.
+`.venv/bin/python -m scripts.verify_live` runs individual/combined public checks and
+a conservative six-link sample, saving ignored local evidence. Combined probes may
+reuse the one-hour in-process response cache and are not independent daily samples.
+`.venv/bin/python -m scripts.benchmark` measures synthetic 1k/5k/10k collections.
 Reminder dates are stored but do not send notifications.
 
 ## AI and Privacy
@@ -192,7 +206,8 @@ ranking inputs; other proposals remain in provenance. No separate paid fallback.
 
 Resume extraction recognizes skills and education lines, not reliable experience
 or project timelines. Scanned PDFs need external OCR. Encrypted or more-than-10-page
-PDFs are rejected. Public uploads require resource-isolated PDF parsing before launch.
+PDFs are rejected. PDF parsing uses a disposable time/CPU-bounded process with a
+Linux memory cap; broader public upload hardening still requires deployment review.
 
 ## Verification
 
@@ -211,6 +226,7 @@ npm run lint
 npm run typecheck
 npm run build
 node scripts/test-migration.mjs
+node scripts/product-smoke.mjs
 ```
 
 The migration test uses PGlite's PostgreSQL engine, not a live Supabase instance.
@@ -235,8 +251,8 @@ frontend/test-results/. The script refuses to reset non-fixture data.
 - No verified daily throughput or source-completeness guarantee.
 - Program catalogs are not verified openings; unknown compensation is common.
 - Single-owner profile/tracking; no tenant authentication or ownership.
-- Full-collection ranking and O(N*M) merging need indexed SQL at larger scale.
-- Distributed locks/backoff and automatic Supabase history retention are absent.
+- Full-collection Python ranking needs SQL filtering/versioned scores at larger scale.
+- Discovery has local/Postgres owner leases; automatic Supabase retention is absent.
 - Eligibility vocabulary, geography, skill semantics and trust need labeled evaluation.
 - No live LLM or hosted Supabase verification without credentials.
 - Optional alerts, command palette, embeddings and auto-apply are absent.
