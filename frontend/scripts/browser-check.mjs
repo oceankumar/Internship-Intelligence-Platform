@@ -9,7 +9,11 @@ page.on("pageerror", (e) => failures.push(e.message));
 page.on("console", (m) => {
   if (m.type() === "error") failures.push(m.text());
 });
-const base = "http://127.0.0.1:3011";
+page.on('response',r => { if(r.url().includes('/api/') && r.status()>=400) failures.push(`${r.status()} ${r.url()}`); });
+const base = process.env.SMOKE_BASE || "http://127.0.0.1:3011";
+await page.goto(base);
+await page.getByRole('button',{name:'Discover new roles',exact:true}).click();
+await page.locator('.job-card').first().waitFor({timeout:30000});
 const fixtureJobs = await (
   await page.request.get(base + "/api/internships?limit=100")
 ).json();
@@ -75,6 +79,16 @@ await page
   .getByRole("button", { name: "Save search", exact: true })
   .click();
 await page.getByText("Search saved.", { exact: true }).waitFor();
+page.once('dialog',d => d.accept());
+await page.getByRole('button',{name:'Delete search Frontend test',exact:true}).click();
+await page.waitForFunction(() => !document.querySelector('[aria-label="Delete search Frontend test"]'));
+await page.getByLabel('Sort opportunities').selectOption('stipend');
+await page.getByText('Choose a currency and pay period to compare stipends.',{exact:false}).waitFor();
+await page.locator('.filter-panel details').evaluate(el => el.open=true);
+await page.getByLabel('Currency',{exact:true}).selectOption('INR');
+await page.getByLabel('Pay period',{exact:true}).selectOption('month');
+await page.locator('.job-card').first().waitFor();
+await page.getByLabel('Sort opportunities').selectOption('recommended');
 const exported = await page.request.get(base + "/api/export.csv?role=frontend");
 assert.equal(exported.status(), 200);
 assert.ok((await exported.text()).includes("Frontend Engineering Intern"));
@@ -112,8 +126,13 @@ await page.screenshot({
   fullPage: false,
 });
 await page.keyboard.press("Escape");
+for (const route of ['','saved','applications','profile','sources','insights']) {
+  await page.goto(base+'/'+route);
+  await page.waitForLoadState('networkidle');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),`Mobile overflow: ${route}`);
+}
 assert.deepEqual(failures, []);
 await browser.close();
 console.log(
-  "PASS: desktop/mobile, pagination, detail, saved roles, status/notes persistence, filtering, saved search, profile, insights, source health, export, no console errors",
+  "PASS: fixture discovery from empty storage, desktop/mobile routes, pagination, tracking persistence, filters, saved-search deletion, safe stipend sort, profile, sources, exports; no console or API errors",
 );

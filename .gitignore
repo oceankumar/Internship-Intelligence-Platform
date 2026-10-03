@@ -64,3 +64,4 @@ build/
 *.sln
 *.swp
 *.swo
+supabase/.temp/

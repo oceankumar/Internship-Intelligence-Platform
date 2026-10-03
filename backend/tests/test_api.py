@@ -98,3 +98,36 @@ def test_private_token_and_host_boundary(client, monkeypatch):
 
 def test_saved_search_invalid_filters_rejected(client):
     assert client.post("/api/searches",json={"name":"Invalid","filters":{"min_match":"1000"}}).status_code == 422
+
+
+def test_readiness_search_explanation_and_reset(client):
+    assert client.get('/ready').json()['status'] == 'ready'
+    data=client.get('/api/internships?q=paid%20frontend%20internships%20underwater').json()
+    assert data['total'] == 0 and data['unparsed_query'] == 'underwater'
+    assert data['search_warnings']
+    job=client.get('/api/internships').json()['items'][0]
+    path='/api/internships/'+job['id']+'/corrections'
+    client.patch(path,json={'remote_status':'onsite'})
+    assert client.patch(path,json={'reset':True}).json()['remote_status'] == 'remote'
+
+
+@pytest.mark.parametrize('mime,content,status', [('image/png',b'png',415),('text/plain',b'\xff',422),('application/pdf',b'%PDF-invalid',422),('text/plain',b' ',422)])
+def test_invalid_resume_uploads(client,mime,content,status):
+    assert client.post('/api/resume/analyze',content=content,headers={'Content-Type':mime}).status_code == status
+
+
+def test_quarantine_excluded_from_all_normal_routes(client):
+    repo=app.dependency_overrides[get_repository]()
+    asyncio.run(repo.upsert_jobs([make_job(url='https://boards.greenhouse.io/acme/jobs/scam',description='Pay registration fee before joining. Telegram only.')]))
+    for path in ('/api/internships','/api/jobs','/api/recommendations'):
+        data=client.get(path).json()
+        jobs=data.get('items',[]) if isinstance(data,dict) else data
+        assert all(j['risk_state'] not in ('quarantined','blocked') for j in jobs)
+    assert len(client.get('/api/listings/risky').json()) == 1
+
+
+def test_operator_enablement_visible_in_health(client,monkeypatch):
+    from app.main import settings
+    monkeypatch.setattr(settings,'enabled_sources',['yc_jobs'])
+    providers=client.get('/api/providers/health').json()
+    assert all(p['status']=='disabled' for p in providers if p['source']!='yc_jobs')
