@@ -30,6 +30,14 @@ export type Job = {
   compensation: string | null;
   compensation_status: string;
   match_score: number;
+  fit_score: number | null;
+  evidence_confidence: number;
+  trust_score: number;
+  risk_state: string;
+  risk_reasons: string[];
+  uncertainties: string[];
+  corrections: Record<string, unknown>;
+  preference_compliance: Record<string, string>;
   opportunity_score: number;
   eligibility_score: number;
   eligibility_status: string;
@@ -69,6 +77,8 @@ export type Page = {
   page: number;
   limit: number;
   parsed_filters: Record<string, string | boolean>;
+  unparsed_query: string;
+  search_warnings: string[];
 };
 export type Analytics = {
   total: number;
@@ -97,6 +107,12 @@ export type Provider = {
   error?: string;
   warnings?: string[];
   last_success?: string;
+  last_useful_result?: string;
+  fetch_success?: boolean;
+  active_records?: number;
+  useful_records?: number;
+  paid_records?: number;
+  remote_records?: number;
 };
 export type Run = {
   id: string;

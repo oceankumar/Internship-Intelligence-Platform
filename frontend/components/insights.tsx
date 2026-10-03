@@ -113,6 +113,8 @@ export function Sources({
               <p>
                 {p.raw_jobs ?? 0} fetched · {p.internships ?? 0} accepted
               </p>
+              <p>{p.active_records ?? 0} active · {p.useful_records ?? 0} with substantial description</p>
+              <small>{p.last_useful_result ? "Last substantial result: " + new Date(p.last_useful_result).toLocaleString() : "No substantial result recorded"}</small>
               <small>
                 {p.duration_ms ? (p.duration_ms / 1000).toFixed(1) + "s" : ""}
               </small>

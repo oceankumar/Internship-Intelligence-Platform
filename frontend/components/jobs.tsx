@@ -7,6 +7,7 @@ import {
   X,
   Check,
   ShieldCheck,
+  RotateCcw,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, Job, label, patchJob, publicLink, statuses } from "../lib/api";
@@ -101,7 +102,7 @@ export function JobCard({
         </button>
         <span className="trust-label">
           <ShieldCheck size={14} />
-          {job.company.trust_score} trust
+          {job.trust_score} listing trust
         </span>
       </div>
       <div className="card-footer">
@@ -141,6 +142,7 @@ export function JobDetail({
     dialog.showModal();
     return () => dialog.close();
   }, []);
+  const sourceValues = job.provenance.source_values as Record<string, unknown> | undefined;
   async function update(changes: Partial<Job>) {
     setBusy(true);
     setError("");
@@ -154,7 +156,7 @@ export function JobDetail({
       setBusy(false);
     }
   }
-  async function correct(field: string, value: string) {
+  async function correct(field: string, value: string | boolean) {
     try {
       const next = await api<Job>("internships/" + job.id + "/corrections", {
         method: "PATCH",
@@ -201,7 +203,8 @@ export function JobDetail({
           <Score value={job.opportunity_score} label="Opportunity" />
           <Score value={job.match_score} label="Match" />
           <Score value={job.eligibility_score} label="Eligibility" />
-          <Score value={job.company.trust_score} label="Trust" />
+          <Score value={job.trust_score} label="Listing trust" />
+          <Score value={job.evidence_confidence} label="Evidence" />
         </div>
         <div className="detail-actions">
           <a
@@ -249,6 +252,8 @@ export function JobDetail({
         </section>
         <section>
           <h3>Why this match?</h3>
+          <p>Fit: {job.fit_score === null ? "Unknown requirements" : job.fit_score + "/100"}. Evidence completeness: {job.evidence_confidence}/100.</p>
+          <div className="badges">{Object.entries(job.preference_compliance || {}).map(([key,value]) => <Badge key={key} tone={value === "matches" ? "green" : "amber"}>{label(key)}: {value}</Badge>)}</div>
           <Breakdown data={job.match_breakdown} />
           <ul>
             {job.match_reasons
@@ -282,6 +287,8 @@ export function JobDetail({
         </section>
         <section>
           <h3>Trust evidence</h3>
+          <p>Listing risk: {job.risk_state}. Company identity evidence: {job.company.trust_score}/100.</p>
+          <ul>{job.risk_reasons?.map((r) => <li key={r}>{r}</li>)}</ul>
           <ul>
             {job.company.trust_reasons.map((r) => (
               <li key={r}>{r}</li>
@@ -393,6 +400,9 @@ export function JobDetail({
         </section>
         <details>
           <summary>Correct extracted information</summary>
+          {Object.keys(job.corrections || {}).length > 0 && <button onClick={() => correct("reset",true)}><RotateCcw size={16}/>Reset to source value</button>}
+          <p className="muted">{Object.keys(job.corrections || {}).length ? "User override is active" : "Source extraction; no user override"}</p>
+          {sourceValues && <p className="muted">Source extraction: {String(sourceValues.remote_status || "unknown")} workplace; {String(sourceValues.compensation_status || "unknown")} compensation. Current values are shown below.</p>}
           <div className="form-grid">
             <label>
               Remote status

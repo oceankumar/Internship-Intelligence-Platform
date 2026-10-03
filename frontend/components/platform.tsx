@@ -97,6 +97,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
       : {}),
   };
   const serialized = new URLSearchParams(effective).toString();
+  const safeSort = sort === "stipend" && (!filters.currency || !filters.period) ? "recommended" : sort;
   const refresh = useCallback(() => setRevision((n) => n + 1), []);
   const changeFilters = (next: FilterValues) => {
     setFilters(next);
@@ -113,10 +114,10 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
       });
     api<Profile>("profile", { signal: controller.signal })
       .then(setProfile)
-      .catch(() => {});
+      .catch((e) => { if (e.name !== "AbortError") setError("Could not load profile. Please retry."); });
     api<SavedSearch[]>("searches", { signal: controller.signal })
       .then(setSearches)
-      .catch(() => {});
+      .catch((e) => { if (e.name !== "AbortError") setError("Could not load saved searches. Please retry."); });
     return () => controller.abort();
   }, [revision]);
   useEffect(() => {
@@ -129,7 +130,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
     setError("");
     const timer = setTimeout(() => {
       api<Page>(
-        `internships?${serialized}&page=${page}&limit=12&sort=${sort}`,
+        `internships?${serialized}&page=${page}&limit=12&sort=${safeSort}`,
         { signal: controller.signal },
       )
         .then(setData)
@@ -144,7 +145,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [serialized, page, sort, revision, listing]);
+  }, [serialized, page, safeSort, revision, listing]);
   useEffect(() => {
     if (view !== "sources") return;
     setLoading(true);
@@ -305,8 +306,8 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
                     <Download size={18} />
                   </summary>
                   <div>
-                    <a href={exportUrl("csv", effective)}>Download CSV</a>
-                    <a href={exportUrl("xlsx", effective)}>Download Excel</a>
+                    <a href={exportUrl("csv", {...effective, sort: safeSort})}>Download CSV</a>
+                    <a href={exportUrl("xlsx", {...effective, sort: safeSort})}>Download Excel</a>
                   </div>
                 </details>
               )}
@@ -347,7 +348,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
               <div className="stats">
                 {[
                   ["Active opportunities", analytics?.total],
-                  ["New in 24 hours", analytics?.new_today],
+                  ["Newly discovered in 24 hours", analytics?.new_today],
                   [
                     "Strong matches",
                     analytics
@@ -415,6 +416,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
                     value={sort}
                     onChange={(e) => {
                       setSort(e.target.value);
+                      if (e.target.value === "stipend") setDrawer(true);
                       setPage(1);
                     }}
                   >
@@ -439,7 +441,8 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
                   {[
                     ["All", {}],
                     ["Recommended", { recommended: "true" }],
-                    ["New", { posted_days: "1" }],
+                    ["Recently posted", { posted_days: "1" }],
+                    ["Newly discovered", { discovered_days: "1" }],
                     ["Remote", { remote: "remote" }],
                     ["Paid", { paid: "true" }],
                     ["Closing soon", { closing_days: "7" }],
@@ -472,9 +475,18 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
                     onClose={closeDrawer}
                     searches={searches}
                     onSave={() => searchDialog.current?.showModal()}
+                    compareStipends={sort === "stipend"}
+                    onDelete={async (name) => {
+                      if (!window.confirm(`Delete saved search "${name}"?`)) return;
+                      try { setSearches(await api<SavedSearch[]>("searches/" + encodeURIComponent(name), {method:"DELETE"})); }
+                      catch (e) { setError((e as Error).message); }
+                    }}
                   />
                 )}
                 <section className="results" aria-label="Internship results">
+                  {sort === "stipend" && safeSort !== sort && <p role="status" className="notice">Choose a currency and pay period to compare stipends. Currently sorted by recommendation.</p>}
+                  {data?.search_warnings?.map((warning) => <p className="notice" key={warning}>{warning}</p>)}
+                  {data?.unparsed_query && <p className="muted">Remaining literal search: {data.unparsed_query}</p>}
                   <div className="results-heading">
                     <h2>
                       {view === "dashboard"

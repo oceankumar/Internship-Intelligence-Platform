@@ -12,14 +12,16 @@ export function ProfileEditor({ onSaved }: { onSaved: () => void }) {
     education: string[];
     suggested_role: string;
   }>();
-  useEffect(() => {
+  function loadProfile() {
+    setMessage("");
     api<Profile>("profile")
       .then((p) => {
         setProfile(p);
         setSkillsText(p.skills.join(", "));
       })
       .catch((e) => setMessage(e.message));
-  }, []);
+  }
+  useEffect(() => { loadProfile(); }, []);
   async function resume(file: File) {
     setBusy(true);
     setMessage("");
@@ -64,7 +66,7 @@ export function ProfileEditor({ onSaved }: { onSaved: () => void }) {
       setBusy(false);
     }
   }
-  if (!profile) return <p role="status">{message || "Loading profile..."}</p>;
+  if (!profile) return <div><p role="status">{message || "Loading profile..."}</p>{message && <button onClick={loadProfile}>Retry</button>}</div>;
   return (
     <form className="profile-form" onSubmit={save}>
       <div className="section-heading">

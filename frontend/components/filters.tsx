@@ -1,7 +1,7 @@
 "use client";
 import { label, roles, SavedSearch, statuses } from "../lib/api";
 import { useEffect, useRef } from "react";
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
 export type FilterValues = Record<string, string>;
 export function Filters({
   value,
@@ -10,6 +10,8 @@ export function Filters({
   onClose,
   searches,
   onSave,
+  onDelete,
+  compareStipends = false,
 }: {
   value: FilterValues;
   onChange: (v: FilterValues) => void;
@@ -17,6 +19,8 @@ export function Filters({
   onClose: () => void;
   searches: SavedSearch[];
   onSave: () => void;
+  onDelete: (name: string) => void;
+  compareStipends?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -149,7 +153,7 @@ export function Filters({
           <option value="30">30 days</option>
         </select>
       </label>
-      <details>
+      <details open={compareStipends ? true : undefined}>
         <summary>More filters</summary>
         <label>
           Application status
@@ -228,6 +232,7 @@ export function Filters({
           Currency
           <select
             value={value.currency || ""}
+            aria-label="Currency"
             onChange={(e) => set("currency", e.target.value)}
           >
             <option value="">Any</option>
@@ -240,6 +245,7 @@ export function Filters({
           Pay period
           <select
             value={value.period || ""}
+            aria-label="Pay period"
             onChange={(e) => set("period", e.target.value)}
           >
             <option value="">Any</option>
@@ -278,6 +284,7 @@ export function Filters({
           Include hidden
         </label>
       </details>
+      <label className="check"><input type="checkbox" checked={value.include_programs === "true"} onChange={(e) => onChange({...value, include_programs: e.target.checked ? "true" : "", include_inactive: e.target.checked ? "true" : ""})} />Include program catalogs</label>
       <div className="filter-actions">
         <button onClick={() => onChange({})}>Clear filters</button>
         <button onClick={onSave}>Save search</button>
@@ -299,6 +306,7 @@ export function Filters({
           </select>
         </label>
       )}
+      {searches.map((s) => <div className="section-heading" key={s.name}><span>{s.name}</span><button className="icon-button" aria-label={"Delete search " + s.name} title={"Delete search " + s.name} onClick={() => onDelete(s.name)}><Trash2 size={16}/></button></div>)}
     </aside>
   );
 }
