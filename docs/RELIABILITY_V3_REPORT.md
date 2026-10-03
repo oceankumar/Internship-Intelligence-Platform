@@ -177,7 +177,7 @@ Final checks are recorded in CURRENT_STATUS.md and the commit close-out. Verifie
 | Actual live UI | PASS 59 non-sample visible internships, desktop/mobile, safe links, no runtime/API failures |
 | Live provider probe | Completed with truthful low-yield/degraded sources; not all sources useful |
 
-One remaining test warning: Starlette's TestClient/httpx deprecation. No application error. Earlier smoke harness failures were an omitted allowed test host and inaccessible exact labels on pay selectors; fixed and rerun, not hidden. No hosted CI execution is claimed merely because a workflow file exists.
+One remaining test warning: Starlette's TestClient/httpx deprecation. No application error. Earlier smoke harness failures were an omitted allowed test host and inaccessible exact labels on pay selectors; fixed and rerun, not hidden. The first actual Linux GitHub CI run passed backend checks but failed clean npm installation because the existing lockfile omitted two optional/transitive emnapi packages. The lockfile was regenerated with CI's npm major version; its clean-install dry run, local lint and typecheck passed. The hosted rerun outcome is reported in the final handoff rather than inferred from the workflow file.
 
 Synthetic performance on this machine (not a production load test):
 
