@@ -4,6 +4,7 @@ Last local verification: 2026-10-04 (Asia/Kolkata). This file supersedes histori
 
 - Backend: 95 regression tests passed; one Starlette/httpx deprecation warning remains.
 - Frontend: lint, typecheck and production build passed; desktop 1440px and mobile 390px fixture workflow passed with no console/API errors.
+- Hosted Linux CI: all regression/build/SQL/browser checks passed on `70a027e`, [run 37154735946](https://github.com/oceankumar/Internship-Intelligence-Platform/actions/runs/37154735946). Earlier lockfile and test-process cleanup failures were repaired and rerun; this is not deployment verification.
 - Real application: 59 visible, non-sample active-looking internships reached the UI after bounded persisted discovery. Original 195 records were retained; 62 new records were added and 5 incoming records updated/merged, leaving 257 stored records.
 - Live probe: six enabled sources tested individually and together, cap 20/source. 68 returned, 67 accepted including 7 catalogs, 66 unique records, 59 unique active-looking internships, 15 with source pay evidence, 44 compensation unknown, 2 remote, 1 explicitly India-located. No Strong Match or Apply Now for the explicit frontend-student evaluation persona.
 - Providers: Greenhouse yielded 20 substantial descriptions; Simplify/GitHub supplied thin tracker leads; RemoteOK supplied no accepted internships; YC public page supplied zero internships among its 20 exposed postings; catalog openings are unverified. Wellfound and Work at a Startup remain disabled.

@@ -78,6 +78,8 @@ All enabled sources use live public content, not mock jobs. Fixtures exist only 
 | GitHub | GET each `GITHUB_TRACKER_URLS`; same header-aware parser and fair interleave; retain tracker URL/apply URL/provider ID | Three seasonal default files; community pay claims not independently verified; generic URLs and mirrors require identities |
 | Greenhouse | GET `https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true`; internship title candidates; fair board selection; GET `/jobs/{id}?pay_transparency=true`; preserve first_published rather than updated_at as posting date | Six configured boards only; no internship candidates on some boards; missing periods/experience; detail failure retains base listing with warning |
 | Catalog | GET `https://raw.githubusercontent.com/deepanshu1422/List-Of-Open-Source-Internships-Programs/master/README.md`; fixed Markdown table columns for name/link/stipend/timeline/eligibility; query-filter and cap through `public_datasets.py` | Static programs, table drift, stale cycles, unknown opening windows; excluded from default internship inventory |
+| Work at a Startup | No HTTP requests or mock data; `discover()` raises an explicit disabled error | Overlaps public YC Jobs; the separate adapter is intentionally unavailable. No rate-limit observations |
+| Wellfound | No HTTP requests or mock data; `discover()` raises an explicit disabled error | Automated public access is restricted; no login or anti-bot bypass. No rate-limit observations |
 
 Default tracker URLs are listed in `backend/app/config.py` and are operator configurable. Default boards: stripe, reddit, gitlab, anthropic, figma, vercel. Greenhouse request semantics were checked against [official Job Board API documentation](https://docs.greenhouse.io/job-board.html).
 
@@ -176,8 +178,9 @@ Final checks are recorded in CURRENT_STATUS.md and the commit close-out. Verifie
 | Product smoke | PASS startup/readiness -> empty fixture store -> discovery -> UI -> tracking/reload -> export |
 | Actual live UI | PASS 59 non-sample visible internships, desktop/mobile, safe links, no runtime/API failures |
 | Live provider probe | Completed with truthful low-yield/degraded sources; not all sources useful |
+| Hosted Linux CI | PASS on `70a027e`: [run 37154735946](https://github.com/oceankumar/Internship-Intelligence-Platform/actions/runs/37154735946), including Python 3.12 tests, clean npm install, lint/typecheck/build, SQL and browser smoke; completed in 1m51s |
 
-One remaining test warning: Starlette's TestClient/httpx deprecation. No application error. Earlier smoke harness failures were an omitted allowed test host and inaccessible exact labels on pay selectors; fixed and rerun, not hidden. The first actual Linux GitHub CI run passed backend checks but failed clean npm installation because the existing lockfile omitted two optional/transitive emnapi packages. The lockfile was regenerated with CI's npm major version; its clean-install dry run, local lint and typecheck passed. The hosted rerun outcome is reported in the final handoff rather than inferred from the workflow file.
+One remaining test warning: Starlette's TestClient/httpx deprecation. No application error. Earlier smoke harness failures were an omitted allowed test host and inaccessible exact labels on pay selectors; fixed and rerun, not hidden. The first actual Linux GitHub CI run passed backend checks but failed clean npm installation because the existing lockfile omitted two optional/transitive emnapi packages. The lockfile was regenerated with CI's npm major version. The second run passed all checks including the browser assertions but was cancelled after an orphaned Next.js process kept the smoke step open. Test servers now run in isolated process groups that are terminated together; local smoke passed and exited successfully. CI has explicit job and smoke-step timeouts. The final hosted rerun passed, including clean shutdown. GitHub also warns that the pinned action versions use a deprecated Node runtime; the runner currently upgrades that runtime automatically. Updating those action versions remains maintenance work, not an application failure.
 
 Synthetic performance on this machine (not a production load test):
 
@@ -240,6 +243,9 @@ Implementation commits, all after passing final checks:
 - `d3ea3ed` fix: harden internship safety, ranking and discovery persistence
 - `9f10ad0` fix: make internship search and ranking uncertainty visible
 - `acb2881` test: add reliability regressions and end-to-end product verification
+- `8b2469b` docs: report verified internship reliability and live supply limits
+- `9a9c267` fix: make frontend lockfile reproducible in Linux CI
+- `70a027e` fix: terminate smoke-test server groups and bound CI runtime
 
 The documentation close-out commit containing this report is identified in the final handoff and Git history (a commit cannot embed its own hash). Author: Ocean Kumar, approved email `67411162+oceankumar@users.noreply.github.com`. New commit attribution is checked on GitHub after push. Existing older unlinked commits are not rewritten; the Contributors page may depend on default-branch inclusion and GitHub processing. No merge to main is authorized or performed.
 
