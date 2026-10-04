@@ -4,7 +4,7 @@
 
 A full-stack platform for discovering, evaluating and tracking internships. Multi-source ingestion, explainable candidate ranking, eligibility checks and listing-risk analysis. Numerical ranking is deterministic; LLM-assisted classification is optional.
 
-[Live demo](https://internai-oceankumars-projects.vercel.app) · [Current status](docs/CURRENT_STATUS.md) · [Architecture](ARCHITECTURE.md) · [Resume/interview guide](docs/RESUME_PROJECT.md)
+[Live demo](https://internai-xi.vercel.app) · [Current status](docs/CURRENT_STATUS.md) · [Architecture](ARCHITECTURE.md) · [Resume/interview guide](docs/RESUME_PROJECT.md)
 
 [![Reliability checks](https://github.com/oceankumar/Internship-Intelligence-Platform/actions/workflows/reliability.yml/badge.svg?branch=main)](https://github.com/oceankumar/Internship-Intelligence-Platform/actions/workflows/reliability.yml)
 

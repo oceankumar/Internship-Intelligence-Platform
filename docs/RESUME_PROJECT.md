@@ -16,16 +16,16 @@ Full-stack internship intelligence platform with multi-source ingestion, explain
 - Built a responsive Next.js/React interface and FastAPI REST backend for internship discovery, profile matching and tracking.
 - Integrated six enabled public-source types with bounded requests, independent failures, throttling, caching and discovery leases.
 - Normalized inconsistent metadata and deduplicated source/URL/requisition identities while preserving tracking state and explaining skill/geography/eligibility constraints.
-- Added 112 backend tests, PostgreSQL-engine migration/RLS/RPC checks and Playwright private/demo workflows with a read-only Vercel Services configuration.
+- Deployed Next.js and FastAPI as Vercel Services with a private backend binding, a sanitized read-only recruiter demo and verified desktop/mobile workflows.
 
-After production verification is recorded in CURRENT_STATUS, the fourth bullet may read: "Deployed Next.js and FastAPI as Vercel Services with a private backend binding and a sanitized read-only recruiter demo." Do not append scheduled discovery or hosted persistence without evidence.
+The suite includes 112 backend tests plus PostgreSQL-engine migration/RLS/RPC and Playwright checks. Do not append scheduled discovery or hosted persistence without evidence.
 
 ## Tech Stack
 Next.js, React, TypeScript, Python, FastAPI, Pydantic, PostgreSQL, Supabase, REST APIs, GitHub Actions, Playwright, Pytest, Vercel Services.
 
 ## Links
 - GitHub: https://github.com/oceankumar/Internship-Intelligence-Platform
-- Demo: https://internai-oceankumars-projects.vercel.app
+- Demo: https://internai-xi.vercel.app
 - Evidence: [CURRENT_STATUS](CURRENT_STATUS.md)
 
 ## Verified Metrics
