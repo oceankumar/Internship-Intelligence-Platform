@@ -17,10 +17,12 @@ export function JobCard({
   job,
   onOpen,
   onChange,
+  readOnly = false,
 }: {
   job: Job;
   onOpen: () => void;
   onChange: (j: Job) => void;
+  readOnly?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -51,7 +53,7 @@ export function JobCard({
           title={job.favorite ? "Unsave role" : "Save role"}
           aria-label={job.favorite ? "Unsave role" : "Save role"}
           aria-pressed={job.favorite}
-          disabled={busy}
+          disabled={busy || readOnly}
           onClick={save}
         >
           <Bookmark size={18} fill={job.favorite ? "currentColor" : "none"} />
@@ -126,10 +128,12 @@ export function JobDetail({
   job: initial,
   onClose,
   onChange,
+  readOnly = false,
 }: {
   job: Job;
   onClose: () => void;
   onChange: (j: Job) => void;
+  readOnly?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [job, setJob] = useState(initial);
@@ -216,7 +220,7 @@ export function JobDetail({
             Apply on source <ExternalLink size={16} />
           </a>
           <button
-            disabled={busy}
+            disabled={busy || readOnly}
             onClick={() => update({ application_status: "applied" })}
           >
             <Check size={16} />
@@ -225,6 +229,7 @@ export function JobDetail({
           <button
             className="icon-button"
             aria-label="Save internship"
+            disabled={readOnly}
             onClick={() => update({ favorite: !job.favorite })}
           >
             <Bookmark size={18} fill={job.favorite ? "currentColor" : "none"} />
@@ -232,6 +237,7 @@ export function JobDetail({
           <button
             className="icon-button"
             aria-label={job.hidden ? "Unhide internship" : "Hide internship"}
+            disabled={readOnly}
             onClick={() => update({ hidden: !job.hidden })}
           >
             <EyeOff size={18} />
@@ -343,7 +349,7 @@ export function JobDetail({
               : "Not listed"}
           </p>
         </section>
-        <section>
+        {!readOnly && <section>
           <h3>Application tracker</h3>
           <label>
             Status
@@ -397,8 +403,8 @@ export function JobDetail({
           <button disabled={busy} onClick={() => update({ notes, contact })}>
             Save notes
           </button>
-        </section>
-        <details>
+        </section>}
+        {!readOnly && <details>
           <summary>Correct extracted information</summary>
           {Object.keys(job.corrections || {}).length > 0 && <button onClick={() => correct("reset",true)}><RotateCcw size={16}/>Reset to source value</button>}
           <p className="muted">{Object.keys(job.corrections || {}).length ? "User override is active" : "Source extraction; no user override"}</p>
@@ -427,7 +433,7 @@ export function JobDetail({
               </select>
             </label>
           </div>
-        </details>
+        </details>}
       </div>
     </dialog>
   );

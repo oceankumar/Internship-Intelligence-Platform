@@ -30,6 +30,13 @@ try {
   const code=await new Promise(resolve => browser.on('exit',resolve));
   assert.equal(code,0,'Browser workflow failed');
   console.log('PASS: complete product smoke startup -> fixture discovery -> browser -> persistence -> export');
+  start('.venv/bin/python',['-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8012'],backend,{PUBLIC_DEMO_MODE:'true',APP_ENV:'production',API_TOKEN:'isolated-demo-test',ALLOWED_HOSTS:'["127.0.0.1","localhost"]'});
+  await ready('http://127.0.0.1:8012/health');
+  start('npm',['run','start','--','--hostname','127.0.0.1','--port','3012'],frontend,{PUBLIC_DEMO_MODE:'true',API_BASE_URL:'http://127.0.0.1:8012',API_TOKEN:'isolated-demo-test',ALLOWED_HOSTS:'127.0.0.1:3012,localhost:3012'});
+  await ready('http://127.0.0.1:3012');
+  const demo=start('node',['scripts/demo-check.mjs'],frontend);
+  const demoCode=await new Promise(resolve=>demo.on('exit',resolve));
+  assert.equal(demoCode,0,'Public demo workflow failed');
 } finally {
   for (const child of children.reverse()) {
     // npm launches a server child; terminate the whole isolated process group.

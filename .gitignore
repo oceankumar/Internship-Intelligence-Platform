@@ -65,3 +65,6 @@ build/
 *.swp
 *.swo
 supabase/.temp/
+.vercel
+.env*
+!.env.example

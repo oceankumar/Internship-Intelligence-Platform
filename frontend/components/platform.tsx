@@ -61,7 +61,8 @@ const headings: Record<string, [string, string]> = {
   profile: ["Candidate profile", "Make your recommendations personal."],
 };
 
-export function Platform({ view = "dashboard" }: { view?: string }) {
+export function Platform({ view = "dashboard", demo = false }: { view?: string; demo?: boolean }) {
+  const [snapshotAt, setSnapshotAt] = useState<string>();
   const [filters, setFilters] = useState<FilterValues>({});
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("recommended");
@@ -107,6 +108,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    api<{snapshot_at: string}>("runtime", {signal: controller.signal}).then(r => setSnapshotAt(r.snapshot_at)).catch(() => {});
     api<Analytics>("analytics/market", { signal: controller.signal })
       .then(setAnalytics)
       .catch((e) => {
@@ -248,7 +250,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
             <Compass size={23} />
           </span>
           <span>
-            Internship<strong>Intelligence</strong>
+            <strong>InternAI</strong><small>Internship Intelligence Platform</small>
           </span>
         </Link>
         <span className="nav-caption">YOUR WORKSPACE</span>
@@ -268,7 +270,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
         <div className="sidebar-bottom">
           <span className="local-label">
             <span />
-            Private workspace
+            {demo ? "Public Demo" : "Private workspace"}
           </span>
           <Link href="/profile" className="profile-link">
             <Avatar name={profile?.name || "You"} />
@@ -290,6 +292,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
           </Link>
         </div>
         <div className="page-content">
+          {demo && <p className="notice"><strong>Public Demo</strong> · Read-only public-source snapshot{snapshotAt ? " · Collected " + new Date(snapshotAt).toLocaleDateString() : ""}. Listings may have changed. <Link href="/about">System architecture</Link></p>}
           <header className="page-heading">
             <div>
               <span className="eyebrow">INTERNSHIP INTELLIGENCE</span>
@@ -313,7 +316,8 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
               )}
               <button
                 className="primary-button"
-                disabled={running}
+                disabled={running || demo}
+                title={demo ? "Discovery is disabled in the public demo" : undefined}
                 onClick={discover}
               >
                 {running ? (
@@ -475,6 +479,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
                     onClose={closeDrawer}
                     searches={searches}
                     onSave={() => searchDialog.current?.showModal()}
+                    readOnly={demo}
                     compareStipends={sort === "stipend"}
                     onDelete={async (name) => {
                       if (!window.confirm(`Delete saved search "${name}"?`)) return;
@@ -538,6 +543,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
                       <div className="job-grid">
                         {data.items.map((j) => (
                           <JobCard
+                            readOnly={demo}
                             key={j.id}
                             job={j}
                             onOpen={() => open(j)}
@@ -593,7 +599,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
               </div>
             </>
           )}
-          {view === "profile" && <ProfileEditor onSaved={refresh} />}
+          {view === "profile" && <ProfileEditor readOnly={demo} onSaved={refresh} />}
           {view === "insights" &&
             (analytics ? (
               <Insights
@@ -619,6 +625,7 @@ export function Platform({ view = "dashboard" }: { view?: string }) {
       </main>
       {selected && (
         <JobDetail
+          readOnly={demo}
           key={selected.id}
           job={selected}
           onClose={close}

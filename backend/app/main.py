@@ -23,7 +23,7 @@ from app.services.repository import make_repository
 from app.services.search import Filters, filter_jobs, interpret_query, sort_jobs
 
 settings = get_settings()
-app = FastAPI(title="Internship Intelligence", version="2.0.0")
+app = FastAPI(title="InternAI - Internship Intelligence Platform", version="1.0.0")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 origins = list(dict.fromkeys([settings.frontend_origin, "http://localhost:3000", "http://127.0.0.1:3000"]))
 app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"], allow_headers=["Content-Type", "Authorization"], allow_credentials=False)
@@ -39,6 +39,8 @@ async def access_boundary(request: Request, call_next):
     origin = request.headers.get("origin")
     if origin and origin not in origins:
         return JSONResponse(status_code=403, content={"error": {"code": "ORIGIN_DENIED", "message": "Origin is not allowed", "recoverable": False}})
+    if settings.public_demo_mode and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        return JSONResponse(status_code=403, content={"error": {"code": "DEMO_READ_ONLY", "message": "Public demo is read-only", "recoverable": False}})
     if request.url.path != "/health":
         token = request.headers.get("authorization", "").removeprefix("Bearer ")
         if settings.api_token:
@@ -68,7 +70,26 @@ async def expected_error(request: Request, exc: HTTPException):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "storage": "supabase" if settings.supabase_enabled else "local_json", "ai_enabled": settings.enable_ai_classification}
+    return {"status": "ok", "storage": storage_mode(), "ai_enabled": settings.enable_ai_classification}
+
+
+def storage_mode():
+    return "public_snapshot" if settings.public_demo_mode else "supabase" if settings.supabase_enabled else "local_json"
+
+
+@app.get("/api/runtime")
+async def runtime(repository=Depends(get_repository)):
+    return {"public_demo": settings.public_demo_mode, "storage": storage_mode(), "snapshot_at": repository.snapshot["snapshot_at"] if settings.public_demo_mode else None}
+
+
+@app.get("/api/health")
+async def api_health():
+    return await health()
+
+
+@app.get("/api/ready")
+async def api_ready(repository=Depends(get_repository)):
+    return await ready(repository)
 
 
 @app.get("/ready")
@@ -78,7 +99,7 @@ async def ready(repository=Depends(get_repository)):
         await asyncio.wait_for(repository.list_jobs(), timeout=10)
     except Exception:
         raise HTTPException(503, "Repository is not ready")
-    return {"status": "ready", "storage": "supabase" if settings.supabase_enabled else "local_json", "ai_configured": bool(settings.enable_ai_classification and settings.ai_model)}
+    return {"status": "ready", "storage": storage_mode(), "ai_configured": bool(settings.enable_ai_classification and settings.ai_model)}
 
 
 async def ranked(repository):

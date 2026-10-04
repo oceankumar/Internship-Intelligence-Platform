@@ -18,5 +18,5 @@ export default async function WorkspacePage({
     ].includes(view)
   )
     notFound();
-  return <Platform view={view} />;
+  return <Platform view={view} demo={process.env.PUBLIC_DEMO_MODE === "true"} />;
 }
