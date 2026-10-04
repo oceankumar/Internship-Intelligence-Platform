@@ -1,145 +1,108 @@
-import re
-from app.models import CompensationStatus, Job, RemoteStatus
-from app.profile import AVOID_SIGNALS, PREFERRED_SKILLS, PREFERRED_TITLES, STARTUP_SIGNALS
+from app.models import CandidateProfile, CompensationStatus, Job, RemoteStatus
+from app.pipeline.eligibility import evaluate_eligibility
+from app.pipeline.lifecycle import refresh_lifecycle
+from app.pipeline.normalizer import enrich_fields, extract_skills, experience_months
+from app.pipeline.trust import apply_trust
+from app.pipeline.geography import canonical_country
 
-OCEAN_SKILLS = {"react", "next.js", "nextjs", "javascript", "typescript", "node.js", "node", "mongodb", "html", "css", "tailwind", "fastapi", "python"}
+MATCH_WEIGHTS = {"skills": 40, "role": 25, "experience": 15, "remote": 10, "compensation": 10}
+OPPORTUNITY_WEIGHTS = {"match": 45, "eligibility": 20, "trust": 15, "freshness": 15, "urgency": 5}
 
 
 def extract_experience_years(text: str) -> int | None:
-    # Match patterns like: "2+ years", "3 years", "5+ yrs", "2-3 years", "experience of 3 years"
-    matches = re.findall(r'\b(\d+)\+?\s*(?:yr|year)s?\b', text)
-    years = [int(m) for m in matches]
-    # Also look for ranges e.g. 3-5 years
-    ranges = re.findall(r'\b(\d+)\s*[-–]\s*(\d+)\s*(?:yr|year)s?\b', text)
-    for r in ranges:
-        years.append(int(r[0]))
-        years.append(int(r[1]))
-    if years:
-        valid_years = [y for y in years if 0 < y < 20]
-        return max(valid_years) if valid_years else None
-    return None
+    months = experience_months(text)
+    return months // 12 if months is not None else None
 
 
-def score_job(job: Job) -> Job:
-    title = job.title.lower()
-    description = job.description.lower()
-    text = f"{title} {description} {' '.join(job.tags)}".lower()
-    
-    score = 20
-    reasons = []
-    
-    # 1. React / Next.js Match (up to 25 points)
-    react_bonus = 0
-    if "react" in text:
-        react_bonus += 15
-    if "next.js" in text or "nextjs" in text:
-        react_bonus += 10
-    score += react_bonus
-    if react_bonus > 0:
-        reasons.append(f"React/Next.js alignment (+{react_bonus})")
-        
-    # 2. Frontend / Web Development Match (up to 25 points)
-    frontend_bonus = 0
-    if any(t in title for t in ["frontend", "front-end", "front end", "web"]):
-        frontend_bonus += 15
-    elif any(s in text for s in ["javascript", "typescript", "html", "css", "tailwind"]):
-        frontend_bonus += 10
-    score += frontend_bonus
-    if frontend_bonus > 0:
-        reasons.append(f"Frontend/Web focus (+{frontend_bonus})")
-        
-    # 3. Remote Preference (up to 15 points)
-    if job.remote_status == RemoteStatus.remote:
-        score += 15
-        reasons.append("Remote workspace matched (+15)")
-    elif job.remote_status == RemoteStatus.hybrid:
-        score += 5
-        reasons.append("Hybrid workspace matched (+5)")
-        
-    # 4. Paid stipend Preference (up to 15 points)
-    if job.compensation_status == CompensationStatus.paid:
-        score += 15
-        reasons.append("Paid stipend (+15)")
-    elif job.compensation_status == CompensationStatus.unpaid:
-        score -= 20
-        reasons.append("Unpaid list penalty (-20)")
+def score_job(job: Job, profile: CandidateProfile | None = None) -> Job:
+    profile = profile or CandidateProfile()
+    enrich_fields(job)
+    for key, value in job.provenance.get("source_values", {}).items():
+        if key in {"remote_status", "compensation_status", "required_skills"}:
+            setattr(job, key, RemoteStatus(value) if key == "remote_status" else CompensationStatus(value) if key == "compensation_status" else value)
+    proposal = job.provenance.get("ai_classification", {}).get("result", {})
+    if proposal.get("evidence") and proposal["evidence"] in job.description:
+        preferred = [s.lower() for s in proposal.get("preferred_skills", []) if s.lower() in job.description.lower()]
+        required = [s.lower() for s in proposal.get("required_skills", []) if s.lower() in job.description.lower()]
+        job.required_skills = sorted(set(job.required_skills + required) - set(preferred))
+        job.preferred_skills = sorted(set(job.preferred_skills + preferred))
+    for key, value in job.corrections.items():
+        if key in {"remote_status", "compensation_status", "required_skills"}:
+            if key == "remote_status":
+                value = RemoteStatus(value)
+            elif key == "compensation_status":
+                value = CompensationStatus(value)
+            setattr(job, key, value)
+    apply_trust(job)
+    refresh_lifecycle(job)
+    evaluate_eligibility(job, profile)
+    skills = set(s.casefold() for s in profile.skills)
+    skills.update(extract_skills(" ".join(profile.skills).lower()))
+    required = set(s.casefold() for s in job.required_skills)
+    preferred = set(s.casefold() for s in job.preferred_skills)
+    job.matching_skills = sorted(required & skills)
+    job.missing_skills = sorted(required - skills)
+    factors = {
+        "skills": len(required & skills) / len(required) if required else 0,
+        "role": 1 if job.role_family in profile.preferred_roles else 0.3,
+        "experience": 0 if job.minimum_experience_months is None else 1 if job.minimum_experience_months <= profile.experience_months else 0,
+        "remote": 1 if not profile.remote_preference or job.remote_status == RemoteStatus.remote else 0,
+        "compensation": 1 if not profile.paid_only or job.compensation_status == CompensationStatus.paid else 0,
+    }
+    if required and preferred:
+        factors["skills"] = .95 * factors["skills"] + .05 * len(preferred & skills) / len(preferred)
+    job.match_breakdown = {k: round(v * MATCH_WEIGHTS[k]) for k, v in factors.items()}
+    job.match_score = sum(job.match_breakdown.values())
+    job.fit_score = round((job.match_breakdown["skills"] + job.match_breakdown["role"] + job.match_breakdown["experience"]) * 100 / 80) if required else None
+    job.skill_evidence_confidence = 100 if required else 40 if preferred else 0
+    job.evidence_confidence = min(100, (40 if required else 0) + (20 if len(job.description.split()) >= 40 else 5) + (10 if job.minimum_experience_months is not None else 0) + (10 if job.graduation_years or job.degree_requirement else 0) + (10 if job.worldwide_remote or job.remote_countries or job.country else 0) + (10 if job.compensation_status != "unknown" else 0))
+    country_preferences = {canonical_country(v) for v in profile.preferred_locations if v.strip()}
+    geography = "matches" if job.worldwide_remote or not country_preferences else "unknown" if not job.country and not job.remote_countries else "matches" if country_preferences.intersection(job.remote_countries + ([job.country] if job.country else [])) else "conflicts"
+    job.preference_compliance = {
+        "paid": "matches" if not profile.paid_only or job.compensation_status == "paid" else "unknown" if job.compensation_status == "unknown" else "conflicts",
+        "remote": "matches" if not profile.remote_preference or job.remote_status == "remote" else "unknown" if job.remote_status == "unknown" else "conflicts",
+        "geography": geography,
+        "role": "matches" if job.role_family in profile.preferred_roles else "conflicts",
+    }
+    job.uncertainties = []
+    if not required:
+        job.uncertainties.append("Required skills are unspecified; fit is unknown")
+    if job.compensation_status == "unknown":
+        job.uncertainties.append("Compensation is not confirmed")
+    if job.remote_status == "remote" and not job.worldwide_remote and not job.remote_countries:
+        job.uncertainties.append("Remote geography is not stated")
+    if job.minimum_experience_months is None:
+        job.uncertainties.append("Experience requirement is not stated")
+    cap = 59 if not required else 64 if factors["skills"] < .75 else 100
+    if geography == "conflicts":
+        cap = min(cap, 64)
+    if job.match_score > cap:
+        job.match_breakdown["evidence/fit constraint"] = cap - job.match_score
+        job.match_score = cap
+    if job.eligibility_status == "Likely Not Eligible":
+        penalty = max(0, job.match_score - 49)
+        job.match_breakdown["eligibility constraint"] = -penalty
+        job.match_score -= penalty
+    job.match_reasons = [f"{k.title()}: {v:+d} points" for k, v in job.match_breakdown.items()]
+    job.match_reasons += job.eligibility_reasons
+    if not required:
+        job.match_reasons.append("Required skills are not stated; skill fit is uncertain")
+    if not profile.skills:
+        job.match_reasons.append("Add your skills to personalize matching")
+    job.match_reasons += job.uncertainties + [f"{key.title()} preference: {value}" for key, value in job.preference_compliance.items()]
+    opportunity = {"match": job.match_score, "eligibility": job.eligibility_score, "trust": job.trust_score, "freshness": job.freshness_score, "urgency": job.urgency_score}
+    job.score_breakdown = {k: round(opportunity[k] * weight / 100) for k, weight in OPPORTUNITY_WEIGHTS.items()}
+    job.opportunity_score = sum(job.score_breakdown.values())
+    recommendable = job.risk_state == "normal" and all(v == "matches" for v in job.preference_compliance.values()) and required and factors["skills"] >= .75 and job.evidence_confidence >= 65 and profile.skills
+    if job.hidden or not job.active or job.company.excluded or job.risk_state in {"quarantined", "blocked"}:
+        job.application_priority = "Hidden / Rejected"
+    elif recommendable and job.match_score >= 85 and job.eligibility_status == "Likely Eligible" and job.trust_score >= 65 and job.evidence_confidence >= 80:
+        job.application_priority = "Apply Now"
+    elif recommendable and job.match_score >= 75 and job.eligibility_status != "Likely Not Eligible" and not job.suspicious:
+        job.application_priority = "Strong Match"
+    elif job.match_score >= 45 and job.eligibility_status != "Likely Not Eligible":
+        job.application_priority = "Worth Exploring"
     else:
-        score -= 5
-        reasons.append("Unclear compensation penalty (-5)")
-        
-    # 5. Startup Preference (up to 10 points)
-    startup_matches = [term for term in STARTUP_SIGNALS if term in text]
-    if startup_matches:
-        score += 10
-        reasons.append("Startup environment signal (+10)")
-        
-    # 6. Entry-level friendliness & AI Interest (up to 10 points)
-    entry_bonus = 0
-    if any(term in text for term in ["student", "freshman", "sophomore", "undergrad", "entry-level", "first-year", "1st year"]):
-        entry_bonus += 5
-    ai_keywords = ["ai", "llm", "openai", "rag", "agent", "gpt", "nlp", "machine learning", "ml"]
-    if any(kw in title or re.search(r"\b" + kw + r"\b", text) for kw in ai_keywords):
-        entry_bonus += 5
-    score += entry_bonus
-    if entry_bonus > 0:
-        reasons.append(f"Entry-level/AI project match (+{entry_bonus})")
-        
-    # Years of experience penalty
-    exp_years = extract_experience_years(description)
-    if exp_years and exp_years >= 2:
-        penalty = min(30, 15 * (exp_years - 1))
-        score -= penalty
-        reasons.append(f"Requires {exp_years}+ years experience (-{penalty})")
-        
-    # Seniority keywords in description penalty
-    avoid_matches = [term for term in AVOID_SIGNALS if term in text]
-    if avoid_matches:
-        penalty = min(20, 10 * len(avoid_matches))
-        score -= penalty
-        reasons.append(f"Senior requirements risk penalty (-{penalty})")
-        
-    # Certificate/fake internship red flag penalty
-    red_flags = ["certificate internship", "unified mentor", "internpe", "bharat intern", "wake up whistle"]
-    if any(flag in text for flag in red_flags) or any(flag in job.company.name.lower() for flag in red_flags):
-        score -= 50
-        reasons.append("Flagged: training program or red-flag keyword (-50)")
-
-    # Trust score alignment
-    if job.company.trust_score < 40 and job.company.suspicious:
-        score -= 10
-        reasons.append("Low trust company penalty (-10)")
-    elif job.company.trust_score >= 80:
-        score += 5
-        reasons.append("High trust company bonus (+5)")
-        
-    # Calculate matching and missing skills
-    job_skills = {s.lower() for s in job.required_skills}
-    if not job_skills:
-        all_profile_skills = {"react", "next.js", "nextjs", "javascript", "typescript", "node.js", "node", "mongodb", "fastapi", "python", "html", "css", "tailwind"}
-        found_skills = {s for s in all_profile_skills if re.search(r"\b" + re.escape(s) + r"\b", text)}
-        job_skills = found_skills
-        
-    matching_skills = sorted(list(job_skills.intersection(OCEAN_SKILLS)))
-    missing_skills = sorted(list(job_skills.difference(OCEAN_SKILLS)))
-    
-    # Store fields
-    job.match_score = max(0, min(100, score))
-    job.match_reasons = reasons
-    job.matching_skills = matching_skills
-    job.missing_skills = missing_skills
-    
-    # Priority buckets:
-    if job.match_score >= 80 and job.compensation_status == CompensationStatus.paid and not job.suspicious:
-        job.application_priority = "Apply Today"
-    elif job.match_score >= 60 and not job.suspicious:
-        job.application_priority = "Apply This Week"
-    else:
-        job.application_priority = "Low Priority"
-        
-    # Sync with relevance_score for backwards compatibility
-    job.relevance_score = job.match_score
-    job.score_reasons = reasons
-    
+        job.application_priority = "Low Match"
+    job.relevance_score, job.score_reasons = job.match_score, job.match_reasons
     return job
-
-

@@ -12,18 +12,14 @@ class PublicDatasetsProvider(Provider):
 
     async def discover(self, query: str, limit: int) -> list[RawInternship]:
         url = "https://raw.githubusercontent.com/deepanshu1422/List-Of-Open-Source-Internships-Programs/master/README.md"
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
         
         try:
             async with self.client() as client:
-                response = await client.get(url, headers=headers)
+                response = await client.get(url)
                 response.raise_for_status()
                 content = response.text
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Failed to fetch public datasets: {e}")
+        except Exception:
+            self.warnings.append("Program catalog fetch failed")
             return []
 
         lines = content.split("\n")
@@ -83,7 +79,7 @@ class PublicDatasetsProvider(Provider):
                 continue
                 
             # Determine remote and compensation
-            remote_status = RemoteStatus.remote
+            remote_status = RemoteStatus.unknown
             
             stipend_lower = stipend_raw.lower()
             compensation = stipend_raw if any(x in stipend_lower for x in ["yes", "paid", "stipend", "prize", "reward", "$", "₹"]) else None
@@ -96,10 +92,10 @@ class PublicDatasetsProvider(Provider):
                     company_name=name_text,
                     url=program_url,
                     description=f"Open Source fellowship/mentorship opportunity: {name_text}. Timeline: {timeline_raw}. Eligibility: {eligibility_raw}.",
-                    location="Remote",
+                    location=None,
                     remote_status=remote_status,
                     compensation=compensation,
-                    date_posted=datetime.utcnow(),
+                    date_posted=None,
                     raw={
                         "stipend": stipend_raw,
                         "timeline": timeline_raw,

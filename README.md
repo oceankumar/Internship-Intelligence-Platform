@@ -1,104 +1,62 @@
 # Internship Intelligence Platform
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Next.js-black?style=flat&logo=next.js)](https://nextjs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript)](https://www.typescriptlang.org)
-[![Python](https://img.shields.io/badge/Python-3.14-blue?style=flat&logo=python)](https://www.python.org)
+A private, single-owner workspace for discovering internships, understanding fit,
+and tracking applications. Next.js/React, FastAPI/Pydantic, and local JSON or
+Supabase PostgreSQL. No auto-apply, invented salary, or required AI subscription.
 
-An autonomous internship discovery, precision-filtering, and ranking intelligence engine built specifically for students. It aggregates hundreds of raw jobs, eliminates 100% of title-matching noise (such as "Internal Tools" or "International Accounting") using regex-based boundary checking, merges duplicate listings using multi-dimensional matching rules, and ranks opportunities with a custom rule-based scoring engine tailored to frontend/React and startup roles.
+## Features
 
----
+- Public-source discovery with source health, raw records and run diagnostics.
+- Editable candidate profile and explainable match, eligibility, trust and opportunity scores.
+- Optional validated AI classification with evidence, confidence checks and cache.
+- Combined filters, pagination, sorting, saved searches and shortlists.
+- Application status, notes, contacts, interview/reminder dates and corrections.
+- Overview, discovery, saved roles, applications, insights, sources and profile views.
+- Temporary PDF/text resume extraction with review before adding skills.
+- CSV/Excel exports using the same filters and formula-injection protection.
 
-## 🛠️ System Architecture
+See [the complete audit](docs/AUDIT_V2.md) for measured provider behavior,
+formulas, database review and prioritized follow-up.
+[Baseline findings](docs/UPGRADE_AUDIT.md) describe the pre-upgrade implementation.
+Other older status documents and screenshots describe historical releases.
 
-The system consists of a fast Python backend orchestrating multi-source discovery, validation, scoring, and deduplication, coupled with a Next.js frontend rendering an interactive dashboard.
+Current verification and limitations: [Current Status](docs/CURRENT_STATUS.md) and
+[Reliability V3 Report](docs/RELIABILITY_V3_REPORT.md). The October 4 bounded probe
+found 59 unique active-looking internship leads, not a daily-volume guarantee.
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │                 Next.js UI                   │
-                  │   (Dashboard, Match Score, Stipends, Export)  │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                                   HTTP (JSON API)
-                                         │
-                                         ▼
-                  ┌──────────────────────────────────────────────┐
-                  │                FastAPI App                   │
-                  │   (endpoints, exporter, make_repository)     │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                                         ▼
-                  ┌──────────────────────────────────────────────┐
-                  │              Discovery Runner                │
-                  │    (orchestrator, registry, normalizer)      │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                 ┌───────────────────────┼───────────────────────┐
-                 ▼                       ▼                       ▼
-      ┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
-      │  SimplifyJobs HTML  │ │   GitHub Trackers   │ │   Greenhouse APIs   │
-      └─────────────────────┘ └─────────────────────┘ └─────────────────────┘
-                 │                       │                       │
-                 └───────────────────────┼───────────────────────┘
-                                         │
-                                         ▼
-                  ┌──────────────────────────────────────────────┐
-                  │              Candidate Filter                │
-                  │   (Regex word boundaries, Seniority gating)  │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                                         ▼
-                  ┌──────────────────────────────────────────────┐
-                  │           Ocean Kumar Ranking                │
-                  │     (React, Paid, Remote, Startup weights)   │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                                         ▼
-                  ┌──────────────────────────────────────────────┐
-                  │             Deduplication Engine             │
-                  │ (Primary Company+Title, Secondary Domain+Sim)│
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                                         ▼
-                  ┌──────────────────────────────────────────────┐
-                  │               Repository Layer               │
-                  │  (Local JSON Store / Supabase Postgres Sync)  │
-                  └──────────────────────────────────────────────┘
+## Architecture
+
+```mermaid
+flowchart LR
+  Sources[Public feeds and boards] --> Providers[Throttled provider adapters]
+  Providers --> Parse[Normalize and preserve evidence]
+  Parse --> Rules[Internship and trust checks]
+  Rules --> AI[Optional validated classification]
+  AI --> Score[Profile match and eligibility]
+  Score --> Merge[Conservative dedupe]
+  Merge --> Store[Local JSON or Supabase]
+  Store --> API[FastAPI filtering and ranking]
+  API --> Proxy[Private Next.js API proxy]
+  Proxy --> UI[Discovery and tracking workspace]
+  Profile[Candidate profile] --> Score
+  Providers --> Runs[Run diagnostics and raw records]
 ```
 
----
+Scam-like listings are quarantined and excluded by default. Fit, evidence completeness,
+and preference compliance are separate; unknown skills do not receive fit credit.
+Scores are recalculated on reads to reflect current profile and freshness. This
+keeps the small-workspace experience consistent but is not yet large-scale SQL
+ranking. Missing metadata stays unknown. Source health means fetch health,
+not verified employer legitimacy.
 
-## ✨ Features
+## Local Setup
 
-* **Multi-Source Crawling**: Integrates RemoteOK, Y Combinator Jobs, Github tech trackers, SimplifyJobs community lists, open source databases (GSoC, Outreachy, LFX, MLH Fellowship), and direct startup Greenhouse boards (Stripe, Reddit, GitLab, Anthropic, Figma, Vercel).
-* **Precision Regex Boundary Filtering**: Bypasses typical false positive title overlaps (such as *Internal Product Engineer* or *International Strategic Lead*) by matching root terms with strict word boundary checks (`\b(intern|...)\b`) and gating seniority exclusions first.
-* **Smart Deduplication**: Merges duplicates across providers using a primary match (`company + title`) and a secondary match (`application domain + title similarity`). Merged records combine tags/skills, record all source platforms in a `sources[]` list, increment `source_count`, and keep the highest trust scores and richest stipend numbers.
-* **Ocean Kumar Scoring**: Applies rule-based weighting (0-100) scoring internships for Ocean's profile (1st year CS/AI student, React/Next.js stack, paid remote/hybrid, early-stage startups).
-* **Priority Categorization**: Buckets roles automatically into *Apply Today*, *Apply This Week*, and *Low Priority*.
-* **Interactive Expandable Details View**: Expand cards on the dashboard to inspect matching skills, missing skills, match reasons, first seen age, and the list of aggregating sources.
-* **Exporting**: Instant export of reviewed internships to CSV and Microsoft Excel formats.
-* **Dual Database Persistence**: Operates on a canonical local JSON file (`backend/data/internships.json`) with instant, seamless migration to Supabase PostgreSQL when variables are set.
+Tested with Python 3.14 and Node 24. Use Python 3.11+ and Node 22+.
+Keep both servers bound to loopback. No credentials are needed locally.
 
----
+Backend, from the repository root:
 
-## 💻 Tech Stack
-
-* **Backend**: Python 3.14+, FastAPI, Pydantic v2, Pytest, Uvicorn, OpenPyXL
-* **Frontend**: React, Next.js, TypeScript, Lucide Icons, Vanilla CSS
-* **Database**: Local JSON File / Supabase (PostgreSQL)
-
----
-
-## 🚀 Local Installation & Run
-
-### Prerequisites
-
-* Python 3.10+
-* Node.js 18+
-
-### 1. Set Up Backend
-
-```bash
+```sh
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
@@ -107,41 +65,208 @@ cp ../.env.example .env
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-*The backend starts up on `http://127.0.0.1:8000`. On boot, it automatically performs a self-healing cleanup of local storage, filtering out any legacy false positives.*
+Frontend, in a second terminal:
 
-### 2. Set Up Frontend
-
-```bash
+```sh
 cd frontend
-npm install
-npm run dev
+npm ci
+npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-*The Next.js dev server starts up on `http://localhost:3000`.*
+Open http://127.0.0.1:3000. Start with My profile, then Discover new roles.
+A new store is empty: no demo data is inserted. Existing jobs and IDs are preserved.
+Known historical sample IDs are hidden and labeled; provider-invented generic
+stipends are no longer pay evidence. Reading does not delete or rewrite the store.
 
----
+Backend config loads backend/.env when started from backend/. Data paths resolve
+relative to the backend directory. Local diagnostics live beside the store in
+internships.state.json; both files are private.
 
-## 📸 Screenshots
+## Configuration
 
-### Dashboard Overview & Metrics Bar
-![Dashboard Metrics](docs/images/dashboard_metrics.png)
+Backend variables are documented in [.env.example](.env.example).
 
-### Stipends Visibility & match Scores
-![Stipend Visibility](docs/images/dashboard_stipends.png)
+| Variable | Default / purpose |
+|---|---|
+| APP_ENV | local; nonlocal requires API token |
+| FRONTEND_ORIGIN | http://localhost:3000 |
+| API_TOKEN | Empty only for loopback local mode; strong secret remotely |
+| ALLOWED_HOSTS | Backend JSON array, default localhost/127.0.0.1/testserver |
+| LOCAL_DATA_PATH | data/internships.json |
+| SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY | Both enable Supabase |
+| REQUEST_TIMEOUT_SECONDS | 20 |
+| PROVIDER_CONCURRENCY, PROVIDER_REQUEST_INTERVAL | 2 providers, 1 second per host |
+| PROVIDER_CACHE_SECONDS, DISCOVERY_COOLDOWN_SECONDS | 3600 / 60 |
+| GREENHOUSE_BOARDS | JSON list: stripe, reddit, gitlab, anthropic, figma, vercel |
+| STALE_DAYS, INACTIVE_DAYS, MINIMUM_TRUST | 30 / 90 / 40 |
+| BLOCKED_COMPANIES, BLOCKED_DOMAINS | Operator-controlled JSON lists |
+| ENABLE_AI_CLASSIFICATION | false |
+| AI_BASE_URL, AI_MODEL, AI_API_KEY | Chat-completions endpoint/model/key |
+| AI_CONFIDENCE_THRESHOLD, AI_CACHE_SECONDS | 0.8 / 604800 |
+| RESUME_MAX_BYTES | 2000000; proxy also enforces 2 MB |
 
----
+Frontend server-only variables belong in frontend/.env.local:
 
-## 🔮 Future Roadmap
+```dotenv
+API_BASE_URL=http://127.0.0.1:8000
+API_TOKEN=
+ALLOWED_HOSTS=localhost:3000,127.0.0.1:3000
+```
 
-- [ ] **Dual-Platform Application Status Synchronization**: Implement a PATCH endpoint to update application statuses directly from the Next.js frontend with single-click actions and timeline states (Applied, Interview, Rejection, Offer).
-- [ ] **Resume Version Tracking**: Add a `resume_version` tracker field to record which resume was used for which submission.
-- [ ] **Days Since Applied Analytics**: Compute and display real-time counters representing how long an application has been active.
-- [ ] **Advanced Domain Filtering**: Expand the secondary confidence deduplication engine to support customizable domain regexes.
+Never use NEXT_PUBLIC_ for secrets. The old NEXT_PUBLIC_API_BASE_URL is unused.
+Frontend ALLOWED_HOSTS is comma-separated with ports; the backend's identically
+named variable is a JSON list without ports. Keep their environment files separate.
 
----
+For remote single-owner use: set WORKSPACE_USER (default owner), a strong
+WORKSPACE_PASSWORD, the actual allowed frontend host, and matching backend/proxy
+API_TOKEN. Use HTTPS and keep the backend private. Remote hosts fail closed without
+a workspace password. Checks run in middleware and again in the API proxy.
+This is not multi-user authentication.
 
-## 👥 Author
+## Supabase
 
-**Ocean Kumar**  
-CS + AI Student and Software Engineer  
-Targeting Paid React, Next.js, Frontend, Fullstack, and Early-stage Startup Internships.
+Back up the database first. For a new database, apply supabase/schema.sql, then
+supabase/migrations/202609260001_intelligence_v2.sql. Existing installations using
+the current base schema need the migrations in order, including
+supabase/migrations/20261003202926_internship_reliability_v3.sql. Older custom schemas need staging
+compatibility review. No live migration runs automatically at startup.
+
+The migration keeps IDs/data, adds intelligence fields/indexes, enables RLS,
+restricts public tables to server credentials, and creates transactional
+upsert/tracking RPCs. It deliberately does not allow unrestricted direct browser
+table access. Service-role keys belong only in the backend.
+
+Local JSON and Supabase are alternative modes, not automatic synchronization.
+Setting credentials does not upload local records. Plan an explicit backed-up import.
+
+## Providers
+
+Six enabled adapters: RemoteOK public JSON; YC public structured listings/JSON-LD;
+SimplifyJobs and GitHub community trackers; configured Greenhouse boards; and an
+explicitly labeled program catalog. Work at a Startup and Wellfound remain disabled.
+No protection bypass or authenticated scraping is attempted.
+
+The September 27 capped probe accepted 66 records, including seven program-catalog
+entries with unverified opening windows. This is not daily volume. See the audit
+for exact URLs, counts and failure points. Tracker paths are season-specific.
+
+## API
+
+Except /health, routes require a token or loopback access in local mode.
+
+| Endpoint | Behavior |
+|---|---|
+| GET /api/internships | Page, limit 1-100, sort and combined filters |
+| GET /api/internships/{id} | Details and evidence |
+| GET /api/recommendations | Up to 12 strong/apply-now matches |
+| GET /api/jobs | Compatibility full-list endpoint |
+| POST /api/discovery/run | Sources, query, limit_per_source, persist |
+| GET /api/discovery/runs and /{id} | Recent runs or one run |
+| GET /api/providers/health | Latest outcome and success/failure timestamps |
+| GET/PUT /api/profile | Single-owner profile |
+| GET /api/applications | Tracked/favorited jobs |
+| PATCH /api/applications/{id} | Status, notes, favorites, hidden, dates, contact |
+| PATCH /api/internships/{id}/corrections | Extraction overlay |
+| GET/POST /api/searches; DELETE /api/searches/{name} | Saved searches |
+| GET /api/analytics/market and /api/analytics/skills | Collection statistics |
+| POST /api/resume/analyze | Raw PDF or UTF-8 text body; no file storage |
+| GET /api/export.csv and /api/export.xlsx | Filtered exports |
+
+Filters: q, role, skill (comma-separated), remote, country, company, paid, source,
+status, favorite, min_match, min_trust, min_opportunity, posted_days, closing_days,
+max_experience, min_stipend, currency, period, include_hidden, include_inactive,
+applications and recommended. Stipend comparisons require currency and pay period.
+No guessed conversion rates.
+
+Read-only discovery:
+
+```sh
+curl http://127.0.0.1:8000/api/discovery/run \
+  -H 'Content-Type: application/json' \
+  -d '{"sources":["startup_career_pages"],"limit_per_source":20,"persist":false}'
+```
+
+persist=false skips run/raw/job/AI-cache writes. Discovery is manual, not scheduled.
+From backend, `.venv/bin/python -m scripts.discover --limit 20` performs persisted
+discovery with the same workspace lease as the button; add `--dry-run` for read-only
+verification. A future scheduler can call this entry point. No scheduler is installed.
+`.venv/bin/python -m scripts.verify_live` runs individual/combined public checks and
+a conservative six-link sample, saving ignored local evidence. Combined probes may
+reuse the one-hour in-process response cache and are not independent daily samples.
+`.venv/bin/python -m scripts.benchmark` measures synthetic 1k/5k/10k collections.
+Reminder dates are stored but do not send notifications.
+
+## AI and Privacy
+
+Core behavior works without a model. When enabled, only public job title/description
+are sent to the configured model, not candidate profiles or resumes. Pydantic rejects
+invalid output; confidence and verbatim evidence are checked. Numerical ranking
+remains deterministic. Only source-supported skill classifications currently change
+ranking inputs; other proposals remain in provenance. No separate paid fallback.
+
+Resume extraction recognizes skills and education lines, not reliable experience
+or project timelines. Scanned PDFs need external OCR. Encrypted or more-than-10-page
+PDFs are rejected. PDF parsing uses a disposable time/CPU-bounded process with a
+Linux memory cap; broader public upload hardening still requires deployment review.
+
+## Verification
+
+```sh
+cd backend
+.venv/bin/python -m pytest -q
+PYTHONPATH=. .venv/bin/python scripts/probe_providers.py
+```
+
+The second command makes bounded live read-only requests. It does not measure daily
+supply. Provider unit tests use fixtures and make no network requests.
+
+```sh
+cd frontend
+npm run lint
+npm run typecheck
+npm run build
+node scripts/test-migration.mjs
+node scripts/product-smoke.mjs
+```
+
+The migration test uses PGlite's PostgreSQL engine, not a live Supabase instance.
+For browser tests, run these in separate terminals:
+
+```sh
+# From backend/
+PYTHONPATH=. .venv/bin/python scripts/serve_test_workspace.py
+# From frontend/, after npm run build
+API_BASE_URL=http://127.0.0.1:8011 ALLOWED_HOSTS=127.0.0.1:3011,localhost:3011 \
+  npm run start -- --hostname 127.0.0.1 --port 3011
+# From frontend/
+npx playwright install chromium
+node scripts/browser-check.mjs
+```
+
+Fixtures are labeled and stored temporarily. Screenshots go to ignored
+frontend/test-results/. The script refuses to reset non-fixture data.
+
+## Known Limits
+
+- No verified daily throughput or source-completeness guarantee.
+- Program catalogs are not verified openings; unknown compensation is common.
+- Single-owner profile/tracking; no tenant authentication or ownership.
+- Full-collection Python ranking needs SQL filtering/versioned scores at larger scale.
+- Discovery has local/Postgres owner leases; automatic Supabase retention is absent.
+- Eligibility vocabulary, geography, skill semantics and trust need labeled evaluation.
+- No live LLM or hosted Supabase verification without credentials.
+- Optional alerts, command palette, embeddings and auto-apply are absent.
+
+## Project Map
+
+- backend/app/providers: source adapters.
+- backend/app/pipeline: parsing, dedupe, trust, eligibility, lifecycle and scoring.
+- backend/app/services: repositories, AI, filters and exports.
+- backend/tests: unit/API/provider regression coverage.
+- frontend/app: routes, private API proxy, layout and styles.
+- frontend/components: workspace views and reusable controls.
+- frontend/scripts: database/browser verification.
+- supabase: base schema and non-destructive migration.
+- docs/AUDIT_V2.md: detailed current audit.
+
+Created by Ocean Kumar.

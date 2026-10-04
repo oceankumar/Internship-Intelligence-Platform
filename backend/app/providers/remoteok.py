@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 from typing import Any
 
 from app.models import RawInternship, RemoteStatus, SourceName
@@ -24,6 +25,8 @@ class RemoteOKProvider(Provider):
             description = str(item.get("description") or "")
             tags = " ".join(item.get("tags") or [])
             searchable = f"{title} {description} {tags}".lower()
+            if not re.search(r"\b(intern|internship|co-op|fellowship)\b", title.lower() + " " + tags.lower()) and not re.search(r"(?:this|the) (?:role|position) is (?:a |an )?(?:paid )?internship", description, re.I):
+                continue
             if terms and not any(term in searchable for term in terms):
                 continue
             posted = self._parse_date(item.get("date"))
@@ -37,10 +40,10 @@ class RemoteOKProvider(Provider):
                     company_name=company,
                     url=str(item.get("url") or f"https://remoteok.com/remote-jobs/{slug}"),
                     description=description,
-                    company_website=item.get("company_logo"),
+                    company_website=item.get("company_website"),
                     location=item.get("location"),
                     remote_status=RemoteStatus.remote,
-                    compensation=item.get("salary"),
+                    compensation=str(item["salary"]) if item.get("salary") else None,
                     date_posted=posted,
                     raw=item,
                 )
@@ -56,4 +59,3 @@ class RemoteOKProvider(Provider):
             return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         except ValueError:
             return None
-

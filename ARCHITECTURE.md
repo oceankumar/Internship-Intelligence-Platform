@@ -1,147 +1,39 @@
-# Technical Architecture: Internship Intelligence Platform
+# Technical Architecture
 
-This document provides an in-depth explanation of the codebase structure, engineering design choices, and data flows within the Internship Intelligence Platform.
+## Current Flow
 
----
+Next.js/React workspace -> same-origin private API proxy -> FastAPI -> local JSON or Supabase repository.
 
-## 1. Directory Structure
+Discovery button and `backend/scripts/discover.py` call the same runner. Persisted runs acquire an owner/expiry lease in locked local state or PostgreSQL. A total timeout is shorter than the lease; stale running records are marked cancelled. Six enabled public adapters fetch bounded batches. Operator `ENABLED_SOURCES` is the runtime authority; legacy SQL source flags are informational.
 
-```
-.
-├── backend
-│   ├── app
-│   │   ├── config.py           # Canonical absolute path resolver and settings
-│   │   ├── main.py             # FastAPI entrypoint and dependency injection
-│   │   ├── models.py           # Pydantic schemas, enums, migration validators
-│   │   ├── pipeline
-│   │   │   ├── dedupe.py       # Canonical string helpers and title matchers
-│   │   │   ├── filters.py      # Regex word boundary and seniority gating
-│   │   │   ├── normalizer.py   # Ingestion object standardizer
-│   │   │   ├── runner.py       # Discovery runner, metrics, and logs
-│   │   │   ├── scorer.py       # Ocean Kumar rule scoring engine
-│   │   │   └── trust.py        # Trust score calculator and blacklist check
-│   │   ├── profile.py          # Profile preferences and exclude terms
-│   │   ├── providers
-│   │   │   ├── base.py         # Abstract base class for search crawlers
-│   │   │   ├── registry.py     # Source mapping and selection factory
-│   │   │   ├── simplify_jobs.py# Community README tracker html parser
-│   │   │   ├── github_jobs.py  # Markdown lists scraper
-│   │   │   ├── public_datasets.py# Mentorship program YAML/JSON loader
-│   │   │   ├── startup_career_pages.py# Greenhouse corporate API client
-│   │   │   └── yc_jobs.py      # YC profile JSON-LD extractor
-│   │   └── services
-│   │       ├── exporter.py     # Dict-to-CSV / OpenPyXL excel generator
-│   │       └── repository.py   # JSON read/write & Supabase Postgres integration
-│   ├── requirements.txt
-│   └── tests
-│       └── test_pipeline.py    # Pytest unit tests suite
-├── frontend
-│   ├── app
-│   │   ├── page.tsx            # Main dashboard, metrics hook, accordion
-│   │   └── globals.css         # Styling system
-│   ├── lib
-│   │   └── api.ts              # API fetch types and functions
-│   └── package.json
-└── supabase
-    └── schema.sql              # Supabase PostgreSQL schema
-```
+Raw records -> normalization -> listing trust/risk -> lifecycle -> profile eligibility/fit -> internship rejection -> optional evidence-validated AI extraction -> conservative indexed merge -> re-score affected records -> persist jobs/raw/run diagnostics. Supabase completion is one transactional RPC; local JSON uses atomic per-file replacement and a shared host file lock, not a cross-file transaction.
 
----
+## Providers
 
-## 2. Ingestion & Provider Pipeline
+RemoteOK reads public JSON once; YC parses the public page's structured `jobPostings` and selectively reads candidate JSON-LD details. YC currently exposes only 20 postings with no verified pagination. Trackers use configurable seasonal README URLs, detect table headers, skip closed rows and fairly interleave sources. Greenhouse fetches configured board lists, fairly selects candidates and requests per-job detail with pay transparency. The program catalog parses a public Markdown README table with fixed columns; it remains separately typed and inactive when opening state is unknown. Neither disabled restricted source is scraped.
 
-All discovery scrapers subclass `Provider` in `base.py` and implement the abstract `discover` method. The pipeline flow is as follows:
+## Ranking
 
-```
-[DiscoveryRequest] ➔ [Runner] ➔ Concurrency Factory (asyncio.gather)
-                                            │
-               ┌────────────────────────────┼────────────────────────────┐
-               ▼                            ▼                            ▼
-      [YC Jobs profile]             [Simplify README]            [Greenhouse API]
-               │                            │                            │
-               └────────────────────────────┼────────────────────────────┘
-                                            │ (List of RawInternship objects)
-                                            ▼
-                                     [Normalizer]
-                                            │ (Standardized Job object)
-                                            ▼
-                                     [Candidate Filter] (filters.py)
-                                            │ (Gated Seniority & Word Boundary)
-                                            ▼
-                                     [Trust Scorer] (trust.py)
-                                            │ (Evaluates Company Signals)
-                                            ▼
-                                     [Match Scorer] (scorer.py)
-                                            │ (Ocean Kumar Weights)
-                                            ▼
-                                     [Repository Upsert] (repository.py)
-                                            │ (Deduplication Merge & Write)
-                                            ▼
-                                     [Database File / Supabase]
-```
+Match = required skills 40 + role 25 + explicit experience 15 + remote preference 10 + paid preference 10. Required skills use matched/known ratio; preferred skills consume only 5% of the skill component when both kinds are known. Unknown requirements and experience receive zero evidence credit. Unknown requirements cap match at 59; weak (<75%) required coverage caps at 64; explicit eligibility conflict caps at 49. Geography conflicts prevent high-priority recommendation.
 
-### Ingestion Highlights
-* **Registry Factory**: In `registry.py`, providers are registered via `SourceName` enums. The runner creates only the selected providers, enabling precise scans.
-* **JSON-LD Schema Extraction**: The YC crawler searches for `<script type="application/ld+json">` inside startup company profiles. This retrieves structured `JobPosting` data containing exact wages (`baseSalary`), start dates, locations, and company URLs.
+Fit is the skills/role/experience subtotal normalized to 100, or null when required skills are unknown. Evidence confidence is a completeness heuristic, not calibrated statistical confidence: required skills 40, substantial description 20 (thin 5), explicit experience 10, degree/graduation 10, geography 10, known compensation 10. Preference compliance separately reports paid/remote/geography/role as matches, conflicts or unknown.
 
----
+Opportunity = match 45% + eligibility 20% + listing trust 15% + freshness 15% + urgency 5%, rounded per component. Strong Match requires match >=75, normal risk, >=75% required coverage, aligned preferences, confidence >=65, and no known eligibility conflict. Apply Now additionally requires match >=85, likely eligible, trust >=65 and confidence >=80. Ineligible listings cannot be Worth Exploring.
 
-## 3. Candidate Filtering & Seniority Exclusions
+Risk signals quarantine application fees/deposits, messaging-only recruitment and guaranteed earnings. Clause-level negation avoids benign fee statements. Invalid application URLs and configured exclusions are blocked. Identity evidence (HTTPS, ATS, supplied domain agreement, named company) is stored separately from listing penalties. These numbers are not legitimacy probabilities or independently verified identity.
 
-To avoid false positive substring matches (such as `"Internal Tools"` matching `"intern"`), `filters.py` enforces regex boundary constraints:
+## Persistence And Scale
 
-* **Seniority Exclusions (Gated First)**: Checks the title against `\b(senior|staff|principal|lead|manager|director|vp|exec|architect|chief|lead-|sr-|sr\.)\b`. If a match is found, the job is immediately rejected, ensuring a role like `"International Lead"` is not parsed.
-* **Word Boundaries**: The title must match `\b(intern|internship|co-op|coop|fellow|apprentice|student)\b`. Words like `"internal"` or `"international"` do not match because they lack a word boundary after `"intern"`.
-* **Description Fallback**: If the title contains no internship or seniority keywords, the system fallbacks to the description, searching for high-confidence phrases (e.g. `"paid internship"`, `"internship role"`).
+Personal tracking and corrections survive rediscovery. Specific URLs, provider IDs and Greenhouse requisition aliases index deduplication; generic careers URLs never establish identity. Cross-source fuzzy matching requires exact company/title/location and strongly similar long descriptions; distinct ATS requisitions remain separate.
 
----
+V3 adds typed listing score/risk/confidence/application fields, synchronizes intelligence ingestion into those columns, and introduces `job_source_instances`. Reads prefer typed ranking/tracking fields. JSON stores evolving explanations, evidence and provenance. Local state retains 100 runs, 10 raw batches and 1000 AI cache entries. Hosted retention remains operator work.
 
-## 4. Match & Trust Scoring Engines
+Listing APIs still load and rank the collection in Python. Measured 10k-job ranking is about 1.7 seconds and peak process RSS about 309MB on this machine; indexed SQL filtering, profile-version score materialization and keyset pagination are required before large or multi-user deployment. Current profile/search/tracking state is single-owner and not tenant-isolated.
 
-### Match Scorer (`scorer.py`)
-Computes a match score (0-100) using a transparent, rule-based algorithm (strictly avoiding LLM latency/cost):
-1. **Starting Score**: Starts at `20`.
-2. **React/Next.js Match**: Adds `+15` for React, `+10` for Next.js.
-3. **Frontend Discipline**: Adds `+15` if Frontend/Web is in the title, or `+10` if core web skills (JavaScript, TypeScript, HTML, CSS, Tailwind) are in the text.
-4. **Remote status**: Adds `+15` for Remote, `+5` for Hybrid.
-5. **Paid Stipend**: Adds `+15` for paid status. Deducts `-20` for unpaid, and `-5` for unclear compensation.
-6. **Startup Signals**: Adds `+10` for early stage/founder signals.
-7. **Entry-level & AI interest**: Adds `+5` for undergrad/student matches, and `+5` for AI/LLM terms.
-8. **Experience Penalties**: Deducts `-15` points per year of experience required above 1 year to filter out roles expecting senior engineers.
+## Boundaries
 
-### Trust Scorer (`trust.py`)
-Calculates a trust score (0-100) evaluating company legitimacy. Points are awarded for having website links (`+25`), active LinkedIn company profiles (`+15`), clear company descriptions (`+15`), and positive product/hiring text signals. Companies with trust scores $< 50$ are marked as suspicious.
+`/health` is process/config only. `/ready` checks repository access without provider calls. Public uploads are limited to 2MB, PDFs to 10 unencrypted pages, extracted text to 50k characters; disposable parser timeout 8s, CPU 5s, Linux address-space cap 512MB. This is not a complete public-upload sandbox.
 
----
+Numerical scores never come from AI. Optional model skill proposals need confidence and verbatim description evidence; other proposals remain in provenance. No model or hosted database credentials were available for live verification.
 
-## 5. Deduplication & Merging Engine
-
-Deduplication occurs in `repository.py` during `upsert_jobs` using a two-tier matching strategy:
-
-### Primary Deduplication
-Matches jobs sharing identical:
-* `canonical_company(company_name)`
-* `canonical_title(title)`
-
-### Secondary Deduplication (Title Similarity)
-Matches jobs sharing:
-* `canonical_company(company_name)`
-* `canonical_domain(url)` (the same corporate website application host, e.g. `palantir.com`)
-* **Keyword overlap**: Shares at least one core engineering keyword (frontend, backend, developer, engineer, software, ai, ml, design, firmware, embedded).
-
-### Merge Properties
-When a duplicate is found, it is merged into the existing record:
-1. **Time**: Retains the oldest `first_seen` date, and sets `last_seen` to `now()`.
-2. **Sources**: Appends the new platform to the `sources[]` list and increments `source_count`.
-3. **Trust**: Retains the highest `trust_score`.
-4. **Stipend**: Retains the richest compensation details (prefers structured monetary ranges over default `"Paid stipend"`).
-5. **Description**: Retains the longer description text.
-
----
-
-## 6. Next.js Frontend Dashboard
-
-The frontend is built on Next.js, displaying an interactive dashboard:
-* **Metrics Visualization**: Shows Total Internships, New Today (`is_new`), New This Week (`days_since_seen <= 7`), Updated This Week (`source_count > 1`), Top Matches (`match_score >= 85`), High Priority count (`Apply Today`), Avg Stipend, and Flagged counts.
-* **Expanded Job Row Accordion**: Triggers local React state updates to render explanation lists, matching and missing skills arrays, and source history without page refreshes.
-* **Export Streaming**: Directly links button triggers to FastAPI `/api/export.csv` and `/api/export.xlsx` download streams.
+No scheduler, notification sender, automatic application, CAPTCHA bypass, production deployment or multi-user account system has been added. See `docs/CURRENT_STATUS.md` and `docs/RELIABILITY_V3_REPORT.md` for current evidence rather than historical screenshots.

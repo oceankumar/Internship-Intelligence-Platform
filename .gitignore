@@ -27,8 +27,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -41,12 +41,9 @@ MANIFEST
 
 # Local Data Store (Excludes collected local database cache)
 backend/data/
-*.json
-!package.json
-!tsconfig.json
-!manifest.json
-!plugin.json
-!next.config.mjs
+*.tsbuildinfo
+test-results/
+playwright-report/
 
 # Node.js & Frontend Build Artifacts
 node_modules/
@@ -67,3 +64,4 @@ build/
 *.sln
 *.swp
 *.swo
+supabase/.temp/

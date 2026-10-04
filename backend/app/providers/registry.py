@@ -22,6 +22,5 @@ def get_providers(settings: Settings, sources: list[SourceName] | None = None) -
         SourceName.public_datasets: PublicDatasetsProvider,
         SourceName.startup_career_pages: StartupCareerPagesProvider,
     }
-    selected = sources or list(available.keys())
+    selected = sources if sources is not None else [s for s in available if s.value in settings.enabled_sources and s not in {SourceName.wellfound, SourceName.work_at_a_startup}]
     return [available[source](settings) for source in selected]
-

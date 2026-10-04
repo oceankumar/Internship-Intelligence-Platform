@@ -1,0 +1,35 @@
+name: Reliability checks
+on: [push, pull_request]
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m venv backend/.venv
+      - run: backend/.venv/bin/pip install -r backend/requirements.txt
+      - run: .venv/bin/python -m pytest -q
+        working-directory: backend
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: node scripts/test-migration.mjs
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: node scripts/product-smoke.mjs
+        working-directory: frontend
+        timeout-minutes: 3

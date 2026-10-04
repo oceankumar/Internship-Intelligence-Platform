@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
@@ -43,6 +43,7 @@ class RawInternship(BaseModel):
     remote_status: RemoteStatus = RemoteStatus.unknown
     compensation: str | None = None
     date_posted: datetime | None = None
+    deadline: datetime | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -74,7 +75,7 @@ class Job(BaseModel):
     source: SourceName
     source_id: str | None = None
     date_posted: datetime | None = None
-    date_discovered: datetime = Field(default_factory=datetime.utcnow)
+    date_discovered: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     relevance_score: int = 0
     score_reasons: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
@@ -93,6 +94,64 @@ class Job(BaseModel):
     match_reasons: list[str] = Field(default_factory=list)
     matching_skills: list[str] = Field(default_factory=list)
     missing_skills: list[str] = Field(default_factory=list)
+    normalized_title: str = ""
+    normalized_company: str = ""
+    company_domain: str | None = None
+    role_family: str = "other"
+    internship: bool | None = None
+    country: str | None = None
+    stipend_min: float | None = None
+    stipend_max: float | None = None
+    compensation_currency: str | None = None
+    compensation_period: str | None = None
+    minimum_experience_months: int | None = None
+    graduation_years: list[int] = Field(default_factory=list)
+    eligibility_text: str = ""
+    summary: str = ""
+    deadline: datetime | None = None
+    original_urls: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    eligibility_score: int = 50
+    eligibility_status: str = "Unclear"
+    eligibility_reasons: list[str] = Field(default_factory=list)
+    freshness_score: int = 0
+    opportunity_score: int = 0
+    urgency_score: int = 0
+    score_breakdown: dict[str, int] = Field(default_factory=dict)
+    match_breakdown: dict[str, int] = Field(default_factory=dict)
+    trust_level: str = "unknown"
+    active: bool = True
+    stale: bool = False
+    expired: bool = False
+    closed: bool = False
+    last_verified_at: datetime | None = None
+    favorite: bool = False
+    hidden: bool = False
+    notes: str = ""
+    applied_at: datetime | None = None
+    interview_at: datetime | None = None
+    reminder_at: datetime | None = None
+    contact: str = ""
+    corrections: dict[str, Any] = Field(default_factory=dict)
+    mentioned_skills: list[str] = Field(default_factory=list)
+    fit_score: int | None = None
+    evidence_confidence: int = 0
+    skill_evidence_confidence: int = 0
+    preference_compliance: dict[str, str] = Field(default_factory=dict)
+    uncertainties: list[str] = Field(default_factory=list)
+    risk_state: Literal["normal", "review", "quarantined", "blocked"] = "review"
+    risk_reasons: list[str] = Field(default_factory=list)
+    listing_risk_score: int = 0
+    trust_score: int = 0
+    opportunity_type: str = "internship"
+    application_state: Literal["open", "closed", "unknown"] = "unknown"
+    remote_countries: list[str] = Field(default_factory=list)
+    remote_regions: list[str] = Field(default_factory=list)
+    worldwide_remote: bool = False
+    authorization_required: bool = False
+    timezone_restriction: str | None = None
+    degree_requirement: str | None = None
+    source_instances: list[dict[str, str]] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -104,7 +163,7 @@ class Job(BaseModel):
                 if s:
                     data["sources"] = [s]
             # Migrate first_seen/last_seen
-            disc = data.get("date_discovered") or datetime.utcnow().isoformat()
+            disc = data.get("date_discovered") or datetime.now(timezone.utc).isoformat()
             if not data.get("first_seen"):
                 data["first_seen"] = data.get("first_seen") or disc
             if not data.get("last_seen"):
@@ -115,7 +174,7 @@ class Job(BaseModel):
 
 class DiscoveryRequest(BaseModel):
     sources: list[SourceName] | None = None
-    query: str = "frontend react next.js internship paid remote"
+    query: str = Field(default="internship", max_length=500)
     limit_per_source: int = Field(default=25, ge=1, le=100)
     persist: bool = True
 
@@ -126,6 +185,20 @@ class SourceReport(BaseModel):
     internships: int
     paid_internships: int
     remote_internships: int
+    rejected: int = 0
+    duplicates: int = 0
+    duration_ms: int = 0
+    status: str = "healthy"
+    error: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    rejection_reasons: dict[str, int] = Field(default_factory=dict)
+    fetch_success: bool = False
+    new_records: int = 0
+    active_records: int = 0
+    invalid_url_records: int = 0
+    parse_errors: int = 0
+    quarantined_records: int = 0
+    useful_records: int = 0
 
 
 class DiscoveryResponse(BaseModel):
@@ -134,9 +207,49 @@ class DiscoveryResponse(BaseModel):
     jobs: list[Job]
     errors: dict[str, str] = Field(default_factory=dict)
     source_report: list[SourceReport] = Field(default_factory=list)
+    run_id: str | None = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+ApplicationStatus = Literal["not_applied", "planning", "applied", "assessment", "interview", "offer", "rejected", "withdrawn"]
+
+
+class CandidateProfile(BaseModel):
+    name: str = Field(default="", max_length=120)
+    skills: list[str] = Field(default_factory=list, max_length=100)
+    preferred_roles: list[str] = Field(default_factory=lambda: ["frontend", "full-stack", "software engineering"], max_length=20)
+    experience_months: int = Field(default=0, ge=0, le=600)
+    education: str = Field(default="", max_length=300)
+    graduation_year: int | None = Field(default=None, ge=2000, le=2100)
+    country: str = Field(default="", max_length=100)
+    preferred_locations: list[str] = Field(default_factory=list, max_length=30)
+    remote_preference: bool = True
+    paid_only: bool = True
+
+
+class ApplicationUpdate(BaseModel):
+    application_status: ApplicationStatus | None = None
+    favorite: bool | None = None
+    hidden: bool | None = None
+    notes: str | None = Field(default=None, max_length=5000)
+    applied_at: datetime | None = None
+    interview_at: datetime | None = None
+    reminder_at: datetime | None = None
+    contact: str | None = Field(default=None, max_length=300)
+
+
+class JobCorrection(BaseModel):
+    remote_status: RemoteStatus | None = None
+    compensation_status: CompensationStatus | None = None
+    required_skills: list[str] | None = Field(default=None, max_length=100)
+    reset: bool = False
+
+
+class SavedSearch(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    filters: dict[str, str] = Field(default_factory=dict)
 
 
 class HealthResponse(BaseModel):
     status: str
     storage: str
-
