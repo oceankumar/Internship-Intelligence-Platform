@@ -12,6 +12,7 @@ export function Filters({
   onSave,
   onDelete,
   compareStipends = false,
+  readOnly = false,
 }: {
   value: FilterValues;
   onChange: (v: FilterValues) => void;
@@ -21,6 +22,7 @@ export function Filters({
   onSave: () => void;
   onDelete: (name: string) => void;
   compareStipends?: boolean;
+  readOnly?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -287,7 +289,7 @@ export function Filters({
       <label className="check"><input type="checkbox" checked={value.include_programs === "true"} onChange={(e) => onChange({...value, include_programs: e.target.checked ? "true" : "", include_inactive: e.target.checked ? "true" : ""})} />Include program catalogs</label>
       <div className="filter-actions">
         <button onClick={() => onChange({})}>Clear filters</button>
-        <button onClick={onSave}>Save search</button>
+        <button disabled={readOnly} title={readOnly ? "Public demo is read-only" : undefined} onClick={onSave}>Save search</button>
       </div>
       {searches.length > 0 && (
         <label>

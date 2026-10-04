@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, Profile, roles } from "../lib/api";
 import { Upload, Save } from "lucide-react";
-export function ProfileEditor({ onSaved }: { onSaved: () => void }) {
+export function ProfileEditor({ onSaved, readOnly = false }: { onSaved: () => void; readOnly?: boolean }) {
   const [profile, setProfile] = useState<Profile>();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -69,6 +69,7 @@ export function ProfileEditor({ onSaved }: { onSaved: () => void }) {
   if (!profile) return <div><p role="status">{message || "Loading profile..."}</p>{message && <button onClick={loadProfile}>Retry</button>}</div>;
   return (
     <form className="profile-form" onSubmit={save}>
+      <fieldset disabled={readOnly} className="profile-fields">
       <div className="section-heading">
         <div>
           <h2>Your next role starts here</h2>
@@ -259,6 +260,7 @@ export function ProfileEditor({ onSaved }: { onSaved: () => void }) {
           {message}
         </p>
       )}
+      </fieldset>
     </form>
   );
 }

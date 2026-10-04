@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { workspaceAccess } from "../../../lib/server-access";
+import { allowedHost, backendUrl } from "../../../lib/service-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,12 +11,11 @@ async function proxy(
 ) {
   const denied = await workspaceAccess(request);
   if (denied) return denied;
+  if (process.env.PUBLIC_DEMO_MODE === "true" && request.method !== "GET")
+    return NextResponse.json({error:{message:"Public demo is read-only"}}, {status:403});
   const origin = request.headers.get("origin");
   const host = request.headers.get("host") || "";
-  const allowedHosts = (
-    process.env.ALLOWED_HOSTS || "localhost:3000,127.0.0.1:3000"
-  ).split(",");
-  if (!allowedHosts.includes(host)) {
+  if (!allowedHost(host)) {
     return NextResponse.json(
       { error: { message: "Workspace host is not allowed" } },
       { status: 403 },
@@ -34,7 +34,7 @@ async function proxy(
     );
   }
   const { path } = await context.params;
-  const base = process.env.API_BASE_URL || "http://127.0.0.1:8000";
+  const base = backendUrl();
   const headers: Record<string, string> = {};
   if (request.headers.get("content-type"))
     headers["Content-Type"] = request.headers.get("content-type")!;

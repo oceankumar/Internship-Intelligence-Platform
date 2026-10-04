@@ -28,6 +28,8 @@ jobs:
         working-directory: frontend
       - run: node scripts/test-migration.mjs
         working-directory: frontend
+      - run: node --experimental-strip-types scripts/service-check.mjs
+        working-directory: frontend
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
       - run: node scripts/product-smoke.mjs

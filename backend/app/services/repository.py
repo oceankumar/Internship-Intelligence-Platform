@@ -282,4 +282,7 @@ class SupabaseRepository(Repository):
 
 
 def make_repository(settings: Settings) -> Repository:
+    if settings.public_demo_mode:
+        from app.services.demo import DemoRepository
+        return DemoRepository()
     return SupabaseRepository(settings) if settings.supabase_enabled else LocalJsonRepository(settings.data_path)

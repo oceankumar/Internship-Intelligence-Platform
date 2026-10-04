@@ -1,5 +1,25 @@
 # Technical Architecture
 
+## Resume Release Deployment
+
+InternAI uses current Vercel Services: Next.js frontend receives the sole public rewrite; FastAPI `app.main:app` stays internal. A caller-declared BACKEND_URL binding and server-only API_TOKEN connect them. Node middleware preserves host/password checks without unsupported Edge output.
+
+```mermaid
+flowchart LR
+  Feeds[Public feeds / ATS boards] --> Pipeline[Normalize / dedupe / risk / eligibility / deterministic ranking]
+  Pipeline -. optional interpretation .-> AI[Validated LLM classification]
+  Pipeline --> DB[Private Supabase repository]
+  Snapshot[Immutable sanitized public snapshot] --> API[FastAPI]
+  DB --> API
+  API --> Binding[Private binding + token]
+  Binding --> Web[Next.js proxy and responsive UI]
+  Web --> Visitor[Recruiter / owner]
+```
+
+The public demo never reads private owner persistence, even if Supabase credentials exist. It serves a generic profile and fresh objects from a timestamped snapshot. Proxy and backend deny mutations; repository rejects writes. No public raw state endpoint exists. Tracking UI is disabled and notes/contact/corrections are absent. Private workflow remains separately tested.
+
+Writable production startup requires Supabase and a backend token; local JSON fallback is forbidden. Hosted database verification and daily cron are not claimed for snapshot deployment. [Deployment details](docs/DEPLOYMENT.md) and [Current Status](docs/CURRENT_STATUS.md) supersede historical stage reports.
+
 ## Current Flow
 
 Next.js/React workspace -> same-origin private API proxy -> FastAPI -> local JSON or Supabase repository.

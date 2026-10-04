@@ -2,11 +2,12 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
 
 
 class Settings(BaseSettings):
     app_env: str = "local"
+    public_demo_mode: bool = False
     frontend_origin: str = "http://localhost:3000"
     supabase_url: str | None = None
     supabase_service_role_key: str | None = None
@@ -39,6 +40,15 @@ class Settings(BaseSettings):
     discovery_timeout_seconds: int = Field(default=150, ge=30, le=600)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @model_validator(mode="after")
+    def production_boundary(self):
+        if self.app_env == "production":
+            if not self.api_token:
+                raise ValueError("Production requires API_TOKEN")
+            if not self.public_demo_mode and not self.supabase_enabled:
+                raise ValueError("Writable production requires Supabase; local JSON is development only")
+        return self
 
     @property
     def data_path(self) -> Path:

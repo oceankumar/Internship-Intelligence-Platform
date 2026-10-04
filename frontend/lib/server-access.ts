@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { allowedHost } from "./service-url";
 
 export async function workspaceAccess(request: NextRequest) {
   const host = request.headers.get("host") || "";
-  const allowed = (
-    process.env.ALLOWED_HOSTS || "localhost:3000,127.0.0.1:3000"
-  ).split(",");
-  if (!allowed.includes(host)) {
+  if (!allowedHost(host)) {
     return NextResponse.json(
       { error: { message: "Workspace host is not allowed" } },
       { status: 403 },
     );
   }
+  if (process.env.PUBLIC_DEMO_MODE === "true") return null;
   const local = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
   const password = process.env.WORKSPACE_PASSWORD;
   if (!local && !password) {
