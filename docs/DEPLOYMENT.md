@@ -18,6 +18,8 @@ Validate proxy readiness, search, filters, detail explanations, mutation restric
 
 Preview protection is separate from demo safety. Project-wide protection changes require approval. Supported authenticated `vercel curl` checks work while protection is enabled.
 
+The owner explicitly approved public read-only previews. Vercel Authentication was disabled for the new internai project only; anonymous preview browser checks passed at desktop and mobile sizes. API mutation protection remains enabled at both application layers.
+
 ## No Cron In Snapshot Mode
 
 A daily cron requires durable Supabase storage, a protected trigger and hosted discovery validation. An ephemeral crawler cannot persist results reliably. Existing lease-protected CLI remains scheduler-ready; no production schedule or daily yield is claimed.
